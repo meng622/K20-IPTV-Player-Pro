@@ -10,7 +10,7 @@
 
 ### 簡介
 
-**K20 Player M3U Pro (Editor Version)** 是一款基於 PyQt6 與 libmpv-2.dll 開發的高效能多功能媒體播放器。本專案衍生自原始 **K20 Player**，核心深度魔改與重構的高效能媒體播放器。專為 IPTV/M3U 直播源優化，支援多屏分屏、畫中畫 (PiP) 及極速頻道加載。並在 **Gemini AI** 的協同合作下完成架構重構、效能優化與功能擴充。
+**K20 IPTV Player Pro (Editor Version)** 是一款基於 PyQt6 與 libmpv-2.dll 開發的高效能多功能媒體播放器。本專案衍生自原始 **K20 Player**，核心深度魔改與重構的高效能媒體播放器。專為 IPTV/M3U 直播源優化，支援多屏分屏、畫中畫 (PiP) 及極速頻道加載。並在 **Gemini AI** 的協同合作下完成架構重構、效能優化與功能擴充。
 
 ### 核心特色
 
@@ -41,7 +41,7 @@
 
 ### Overview
 
-**K20 Player M3U Pro (Editor Version)** is a high-performance, multi-functional media player built with PyQt6 and `libmpv-2.dll`. Derived from the original **K20 Player**, this project features a deeply modded and restructured core specifically optimized for IPTV/M3U live streams—supporting multi-screen split views, Picture-in-Picture (PiP), and ultra-fast channel loading. Architecture refactoring, performance optimizations, and feature enhancements were completed in collaboration with **Gemini AI**.
+**K20 IPTV Player Pro (Editor Version)** is a high-performance, multi-functional media player built with PyQt6 and `libmpv-2.dll`. Derived from the original **K20 Player**, this project features a deeply modded and restructured core specifically optimized for IPTV/M3U live streams—supporting multi-screen split views, Picture-in-Picture (PiP), and ultra-fast channel loading. Architecture refactoring, performance optimizations, and feature enhancements were completed in collaboration with **Gemini AI**.
 
 ### Key Features
 
