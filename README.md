@@ -1,4 +1,4 @@
-# K20 Player M3U Pro (Editor Version)
+# K20 IPTV Player Pro (Editor Version)
 ### 專為 M3U 直播與多屏觀看打造的高效能播放器
 ### A High-Performance Media Player Built for M3U Live Streaming & Multi-Screen Viewing
 
