@@ -1,5 +1,5 @@
 # K20 Player (libmpv2.dll) 魔改版 Editor Version
-
+# K20 Player M3U Pro | K20 播放器 M3U 專業版
 [繁體中文](https://www.google.com/search?q=%23%E7%B9%81%E9%AB%94%E4%B8%AD%E6%96%87) | [English](https://www.google.com/search?q=%23english)
 
 ---
