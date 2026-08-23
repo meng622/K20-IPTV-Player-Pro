@@ -25,7 +25,7 @@ from drop_manager import DropManager
 class K20PlayerUI主視窗(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("K20 IPTV Player Pro (Editor Version)")
+        self.setWindowTitle("K20 IPTV Player Pro (Editor Version) v1.0.0")
         self.resize(1270, 660)  # 🎯 每次打開預設 Resize 1280x720
 
         # --------------------------------------------------
