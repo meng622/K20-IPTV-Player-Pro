@@ -8,6 +8,7 @@ import urllib.request  # 網絡請求
 import sqlite3
 import hashlib
 import xml.etree.ElementTree as ET
+
 from ctypes import c_char_p, c_void_p, c_int, c_double, byref  # C數據類型
 
 #========================================================================================================
