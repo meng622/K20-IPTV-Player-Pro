@@ -4,6 +4,7 @@ from config import *  # 匯入配置
 from datetime import datetime
 from widgets import RoundedMenu  # 引入自訂圓角選單
 
+#=============================================================================================
 def natural_sort_key(s):
     """自然排序：將文字中的數字拆解為整數 (解決 EP1 < EP2 < EP10 排序混亂問題)"""
     return [int(text) if text.isdigit() else text.lower() for text in re.split(r'(\d+)', str(s))]
@@ -13,6 +14,7 @@ try:
 except ImportError:
     IconManager = None
 
+#=============================================================================================
 
 def get_rounded_pixmap(pixmap: QPixmap, target_size: QSize, radius: int = 5) -> QPixmap:
     """
@@ -42,8 +44,8 @@ def get_rounded_pixmap(pixmap: QPixmap, target_size: QSize, radius: int = 5) -> 
     painter.end()
 
     return out_pixmap
-
-
+    
+#=============================================================================================
 
 def _clean_epg_key(text):
     """強效清理頻道名稱：轉小寫、去除畫質標記 (HD/4K/FHD) 與所有非英數中文字元"""
@@ -53,97 +55,37 @@ def _clean_epg_key(text):
     text = re.sub(r'(4k|fhd|hd|sd|hevc|60fps|頻道|台)', '', text)
     text = re.sub(r'[^a-zA-Z0-9\u4e00-\u9fa5]', '', text)
     return text.strip()
+        
+#=============================================================================================
 
+class LogoFetchThread(QThread):
+    """背景非同步下載台標線程，完全不霸佔 UI 主線程"""
+    finished_signal = pyqtSignal(str, object)
 
-
-class EPGWorker(QThread):
-    """背景加載與解析 EPG XML 資料的線程"""
-    finished_signal = pyqtSignal(dict)
-    
-    
-    
-    def __init__(self, epg_urls):
+    def __init__(self, url, path, box):
         super().__init__()
-        self.epg_urls = epg_urls
-        
-        
-        
+        self.url = url
+        self.path = path
+        self.box = box
+
     def run(self):
-        epg_data = {}
-        xml_raw = None
-        
-        os.makedirs("epg_cache", exist_ok=True)
-        cache_xml_path = os.path.join("epg_cache", "cache_0.xml")
-        
-        for url in self.epg_urls:
-            try:
-                print(f"🌐 正在下載 EPG: {url}")
-                req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
-                with urllib.request.urlopen(req, timeout=12) as resp:
-                    xml_raw = resp.read()
-                    with open(cache_xml_path, "wb") as f_cache:
-                        f_cache.write(xml_raw)
-                    print("✅ EPG 下載完成")
-                    break
-            except Exception as e:
-                print(f"❌ EPG 下載失敗 ({url}): {e}")
-                continue
-
-        if not xml_raw and os.path.exists(cache_xml_path):
-            try:
-                with open(cache_xml_path, "rb") as f_cache:
-                    xml_raw = f_cache.read()
-                print("📦 使用本地快取 EPG 檔案")
-            except Exception:
-                pass
-
-        if not xml_raw:
-            print("⚠️ 未能取得任何 EPG XML 資料")
-            self.finished_signal.emit({})
-            return
-
         try:
-            root = ET.fromstring(xml_raw)
-            channel_map = {}
-            for ch in root.findall('channel'):
-                ch_id = ch.get('id', '')
-                display_name = ch.findtext('display-name', '')
-                if ch_id:
-                    channel_map[ch_id.lower().strip()] = _clean_epg_key(display_name)
+            import urllib.parse, urllib.request
+            safe_url = urllib.parse.quote(self.url, safe=':/?&=#%')
+            req = urllib.request.Request(safe_url, headers={'User-Agent': 'Mozilla/5.0'})
+            with urllib.request.urlopen(req, timeout=4) as resp:
+                data = resp.read()
+                with open(self.path, "wb") as f:
+                    f.write(data)
+                self.finished_signal.emit(self.path, self.box)
+        except Exception:
+            pass
 
-            for prog in root.findall('programme'):
-                ch_id = prog.get('channel', '').lower().strip()
-                start = prog.get('start', '')
-                stop = prog.get('stop', '')
-                title = prog.findtext('title', '')
+#=============================================================================================
 
-                # 📌 建立三向清理索引 Key (原始ID / 顯示名稱 / 清理後名稱)
-                keys_to_index = set()
-                if ch_id:
-                    keys_to_index.add(ch_id)
-                    keys_to_index.add(_clean_epg_key(ch_id))
-                if ch_id in channel_map and channel_map[ch_id]:
-                    keys_to_index.add(channel_map[ch_id])
-
-                prog_dict = {'start': start, 'stop': stop, 'title': title}
-                for ch_key in keys_to_index:
-                    if ch_key:
-                        if ch_key not in epg_data:
-                            epg_data[ch_key] = []
-                        epg_data[ch_key].append(prog_dict)
-
-            print(f"🎉 EPG 解析成功！共索引 {len(epg_data)} 個頻道 Key")
-        except Exception as e:
-            print(f"❌ EPG XML 解析失敗: {e}")
-
-        self.finished_signal.emit(epg_data)
-        
-        
-        
 class ChannelPanelManager:  # 面板管理器
     def __init__(self, main_window):  # 初始化
         self.win = main_window  # 綁定主視窗
-    
     
     # ========== 側邊欄 ==========
     def init_sidebar(self):
@@ -161,8 +103,6 @@ class ChannelPanelManager:  # 面板管理器
 
         self.win.sidebar_btns = []  # 按鈕列表
         
-        
-        
         # 🎯 1. 視圖切換按鈕列表 (SVG圖示名, 提示文字, 模式標籤)
         view_buttons = [
             ("tv", "直播頻道", "live"),
@@ -170,7 +110,7 @@ class ChannelPanelManager:  # 面板管理器
             ("folder", "最近播放", "history"),
             ("film", "本地媒體", "local")  # 👈 新增：本地媒體播放列表按鈕
         ]
-
+        
         for icon_name, tip, mode in view_buttons:
             btn = QPushButton("")  # 列表管理按鈕
             btn.setToolTip(tip)  # 設定工具提示
@@ -180,14 +120,12 @@ class ChannelPanelManager:  # 面板管理器
             self.win.sidebar_btns.append(btn)  # 存入列表
             layout.addWidget(btn)  # 加入佈局
             
-            
-            
         # 🎯 2. 工具功能按鈕列表 (SVG圖示名, 提示文字, 觸發函數)
         action_buttons = [
             ("m3u", "訂閱列表管理", self.win.shortcut_mgr.open_m3u_manager),
             ("help", "快捷說明", self.win.shortcut_mgr.open_help_dialog)
         ]
-
+        
         for icon_name, tip, slot in action_buttons:
             btn = QPushButton("")  # 列表管理按鈕
             btn.setToolTip(tip)  # 設定提示
@@ -199,8 +137,6 @@ class ChannelPanelManager:  # 面板管理器
 
         layout.addStretch()  # 加入彈性空間
         
-        
-
         # 🎯 3. 底部系統設定按鈕
         setting_btn = QPushButton("")  # 🧽 清空 Emoji
         setting_btn.setToolTip("系統設置")  # 設定提示
@@ -211,25 +147,20 @@ class ChannelPanelManager:  # 面板管理器
         self.win.sidebar_btns.append(setting_btn)  # 存入列表
         layout.addWidget(setting_btn)  # 加入佈局
         
-        
-
         # 🎯 4. 預設高亮首鈕
-        if hasattr(self.win, 'update_sidebar_btn_styles') and self.win.sidebar_btns:
+        if self.win.sidebar_btns:
             self.win.update_sidebar_btn_styles(self.win.sidebar_btns[0])
             
-            
-        
         # 🎯 5. 側邊欄加入佈局
-        if hasattr(self.win, 'sidebar') and isinstance(self.win.sidebar, QWidget):
-            self.win.main_layout.addWidget(self.win.sidebar)
+        self.win.main_layout.addWidget(self.win.sidebar)
             
-            
-        
+#=============================================================================================
+    
     def show_group_menu(self):  # 顯示分組選單
         menu = RoundedMenu(self.win)  # 建立圓角選單
         
         # 使用 dict.fromkeys 保留原始順序並快速去重
-        raw_groups = [ch.get('group', '未分類') or '未分類' for ch in getattr(self.win, 'all_channels_data', []) if isinstance(ch, dict)]
+        raw_groups = [ch.get('group', '未分類') or '未分類' for ch in self.win.all_channels_data if isinstance(ch, dict)]
         groups = ["全部分組"] + list(dict.fromkeys(raw_groups))
 
         for g_name in groups:
@@ -240,16 +171,16 @@ class ChannelPanelManager:  # 面板管理器
         if hasattr(self.win, 'btn_group_menu'):
             menu.exec(self.win.btn_group_menu.mapToGlobal(QPoint(0, self.win.btn_group_menu.height())))
             
-            
-
+#=============================================================================================
+    
     def filter_by_group(self, group_name):  # 執行分組過濾
         self.win.current_group_filter = group_name
         display_text = group_name if len(group_name) <= 8 else group_name[:7] + "…"
         self.win.btn_group_menu.setText(f"{display_text} ▾")
         self.load_live_channels(reset=True)
         
-        
-
+#=============================================================================================
+    
     def show_sort_menu(self):  # 顯示排序選單
         menu = RoundedMenu(self.win)
         sort_options = [
@@ -264,24 +195,23 @@ class ChannelPanelManager:  # 面板管理器
             action.triggered.connect(lambda _, m=mode_id, l=mode_label: self.set_sort_mode(m, l))
             menu.addAction(action)
 
-        if hasattr(self.win, 'btn_sort_menu'):
-            menu.exec(self.win.btn_sort_menu.mapToGlobal(QPoint(0, self.win.btn_sort_menu.height())))
-            
-            
-
+        menu.exec(self.win.btn_sort_menu.mapToGlobal(QPoint(0, self.win.btn_sort_menu.height())))
+    
+#=============================================================================================
+    
     def set_sort_mode(self, mode, label):  # 設定排序模式
         self.win.current_sort_mode = mode
         self.win.btn_sort_menu.setText(f"{label} ▾")
         
         # 🎯 判斷當前頁面：若在直播頁面就刷直播，若在本地媒體/歷史紀錄就刷對應頁面
-        current_view = getattr(self.win, 'channel_list_mode', 'live')
+        current_view = self.win.channel_list_mode
         if current_view == 'live':
             self.load_live_channels(reset=True)
         else:
             self.switch_channel_view(current_view)
-        
-        
-
+            
+#=============================================================================================
+    
     def toggle_ping_test(self):  # 開關測速
         if getattr(self, 'is_pinging', False):
             self.is_pinging = False
@@ -328,9 +258,7 @@ class ChannelPanelManager:  # 面板管理器
                         if not self.is_stopped:
                             self.progress.emit(url, -1)
                 self.finished_signal.emit()
-                
-                
-
+        
         def _on_ping_update(url, ms):
             self.win.channel_latencies[url] = ms
             for idx in range(self.win.channel_list.count()):
@@ -339,22 +267,24 @@ class ChannelPanelManager:  # 面板管理器
                     widget = self.win.channel_list.itemWidget(item)
                     if widget:
                         self.update_latency_badge(widget, ms)
-                        
-                        
-
+                    break  # 🎯 關鍵優化：搵到即停，唔再盲搗全列表！
+        
         def _on_ping_finished():
             self.is_pinging = False
             self.win.btn_ping_test.setText("⚡ 測速")
             if hasattr(self, 'ping_worker'):
+                self.ping_worker.quit()
+                self.ping_worker.wait(500)  # 🎯 確保線程完全終止
                 self.ping_worker.deleteLater()
-
+                self.ping_worker = None      # 🎯 徹底釋放資源
+        
         self.ping_worker = PingWorker(self.win.filtered_channels_cache)
         self.ping_worker.progress.connect(_on_ping_update)
         self.ping_worker.finished_signal.connect(_on_ping_finished)
         self.ping_worker.start()
-        
-        
-        
+    
+#============================================================================================= 
+   
     def update_latency_badge(self, item_widget, ms):
         badge = item_widget.findChild(QLabel, "latency_badge")
         if not badge:
@@ -386,10 +316,8 @@ class ChannelPanelManager:  # 面板管理器
                 padding: 2px 6px;
             }}
         """)
-        
-        
-        
-    # ========== 頻道面板 ==========
+  
+#============= 頻道面板 =========================================================================
     def init_channel_panel(self):  # 初始化頻道面板
         print("🚀 [DEBUG] ChannelPanelManager 初始化中...")
         self.win.channel_panel = QWidget(self.win)
@@ -413,8 +341,7 @@ class ChannelPanelManager:  # 面板管理器
                 self.load_live_channels(reset=False)
         self.win.channel_list.verticalScrollBar().valueChanged.connect(_on_scroll_valueChanged)
         
-        if hasattr(self.win, 'on_channel_scroll'):
-            self.win.channel_list.verticalScrollBar().valueChanged.connect(self.win.on_channel_scroll)
+        self.win.channel_list.verticalScrollBar().valueChanged.connect(self.win.on_channel_scroll)
 
         # ✅ 修正：改為綁定 ChannelPanelManager 內部的點擊處理函數
         self.win.channel_list.itemClicked.connect(self.on_channel_item_clicked)
@@ -499,17 +426,19 @@ class ChannelPanelManager:  # 面板管理器
 
         return self.win.channel_panel
         
+#=============================================================================================
 
     def set_quality_filter(self, quality, clicked_btn):
         self.win.current_quality = quality
-        for btn in getattr(self.win, 'filter_btn_list', []):
+        for btn in self.win.filter_btn_list:
             is_target = (btn == clicked_btn)
             btn.setProperty("active", "true" if is_target else "false")
             btn.style().unpolish(btn)
             btn.style().polish(btn)
         self.load_live_channels(reset=True)
         
-        
+#=============================================================================================
+    
     def on_channel_item_clicked(self, item):
         if not item:
             return
@@ -523,87 +452,90 @@ class ChannelPanelManager:  # 面板管理器
         self.win.current_channel_name = clean_name
         print(f"📌 [DEBUG] 頻道已點擊，寫入 current_channel_name: '{clean_name}'")
 
-        idx = getattr(self.win, 'active_player_index', 0)
-        
-        if hasattr(self.win, 'video_widgets') and 0 <= idx < len(self.win.video_widgets):
+        idx = self.win.active_player_index
+        if 0 <= idx < len(self.win.video_widgets):
             w = self.win.video_widgets[idx]
             w.channel_info = {'name': clean_name, 'url': url}
             w.channel_url = url
             w.channel_name = clean_name
             w.has_media = True
 
-        if hasattr(self.win, 'play_channel'):
-            self.win.play_channel(item)
+        self.win.play_channel(item)
+        
+        self.win.screen_mgr.update_screen_borders()
 
-        if hasattr(self.win, 'screen_mgr'):
-            self.win.screen_mgr.update_screen_borders()
-
-        # 🎯 核心修正：點擊頻道時，主動通知右側 EPG 面板載入並刷新節目表
-        if hasattr(self.win, 'epg_panel') and self.win.epg_panel:
-            # 會自動嘗試你 EPG 面板常見的更新函數（請依你 epg_panel 實際的方法名為準）
-            if hasattr(self.win.epg_panel, 'update_epg'):
-                self.win.epg_panel.update_epg(clean_name)
-            elif hasattr(self.win.epg_panel, 'load_epg'):
-                self.win.epg_panel.load_epg(clean_name)
-            elif hasattr(self.win.epg_panel, 'select_channel'):
-                self.win.epg_panel.select_channel(clean_name)
+        # 🎯 直接調用唯一正確的方法 (已確認 epg_panel.py 只有此方法)
+        if self.win.epg_panel:
+            self.win.epg_panel.update_epg_content(clean_name)
                 
-            
+#=============================================================================================
+        
     def _get_current_epg_title(self, ch):
-        """強效比對當前時間與頻道節目表（已對齊多重數據源）"""
-        # 📌 修復：同時比對 self.win.epg_cache, self.win.epg_data 與 self.epg_data
-        epg_cache = (
-            getattr(self.win, 'epg_cache', {}) or 
-            getattr(self.win, 'epg_data', {}) or 
-            getattr(self, 'epg_data', {})
-        )
-        if not epg_cache:
-            return ""
-
-        # 多重 Key 測試：tvg_id / tvg_name / 頻道原名 / 清理後純淨名
+        """🟢 智能版：優先讀內存字典，內存無先讀SQLite，並有快取防止卡頓"""
+        epg_cache = getattr(self.win, 'epg_data', {}) or getattr(self.win, 'epg_cache', {}) or {}
+        
+        tvg_id = ""
+        name = ""
         keys_to_check = []
         if isinstance(ch, dict):
-            if ch.get('tvg_id'):
-                keys_to_check.append(str(ch.get('tvg_id')).lower().strip())
-                keys_to_check.append(_clean_epg_key(ch.get('tvg_id')))
+            tvg_id = ch.get('tvg_id', '')
+            name = ch.get('name', '')
+            if tvg_id:
+                keys_to_check.append(str(tvg_id).lower().strip())
+                keys_to_check.append(_clean_epg_key(tvg_id))
             if ch.get('tvg_name'):
                 keys_to_check.append(_clean_epg_key(ch.get('tvg_name')))
-            if ch.get('name'):
-                raw_name = str(ch.get('name')).strip()
+            if name:
+                raw_name = str(name).strip()
                 keys_to_check.append(raw_name.lower())
                 keys_to_check.append(_clean_epg_key(raw_name))
 
-        progs = []
+        # 🎯 建立快取字典，避免每次滾動都去查硬碟（呢個係唔卡嘅核心）
+        if not hasattr(self, '_epg_title_cache'):
+            self._epg_title_cache = {}
+        cache_key = f"{tvg_id}|{name}"
+        if cache_key in self._epg_title_cache:
+            return self._epg_title_cache[cache_key]
+
+        title = ""
+        # 1. 優先查內存字典（速度最快）
         for k in keys_to_check:
             if k and k in epg_cache:
-                progs = epg_cache[k]
-                break
+                for p in epg_cache[k]:
+                    try:
+                        s_raw = p.get('start', '').split()[0][:14]
+                        e_raw = p.get('stop', '').split()[0][:14]
+                        if len(s_raw) >= 12:
+                            st = datetime.strptime(s_raw.ljust(14, '0'), "%Y%m%d%H%M%S")
+                            et = datetime.strptime(e_raw.ljust(14, '0'), "%Y%m%d%H%M%S")
+                            now = datetime.now()
+                            if st <= now <= et:
+                                title = p.get('title', '')
+                                break
+                    except Exception:
+                        continue
+                if title:
+                    break
 
-        if not progs:
-            return ""
-
-        now = datetime.now()
-        for p in progs:
+        # 2. 內存無，回退查 SQLite 資料庫（只會查一次，之後有快取）
+        if not title and hasattr(self.win, 'epg_db') and self.win.epg_db:
             try:
-                # 📌 解析 XML 時間 (格式通常為 YYYYMMDDHHMMSS +0800)
-                s_raw = p.get('start', '').split()[0][:14]
-                e_raw = p.get('stop', '').split()[0][:14]
-                if len(s_raw) >= 12 and len(e_raw) >= 12:
-                    st = datetime.strptime(s_raw.ljust(14, '0'), "%Y%m%d%H%M%S")
-                    et = datetime.strptime(e_raw.ljust(14, '0'), "%Y%m%d%H%M%S")
-                    if st <= now <= et:
-                        return p.get('title', '')
+                title = self.win.epg_db.get_current_program(tvg_id, name)
             except Exception:
-                continue
-        return ""
+                pass
+
+        # 記入快取
+        self._epg_title_cache[cache_key] = title
+        return title
         
-        
+#=============================================================================================
+   
     def _get_channel_row_widget(self, ch, i, is_fav):
         """🎯 重構：帶有完美 R 角台徽、SVG Icon、無黑邊與青色 EPG 的頻道卡片"""
         item_widget = QWidget()
         
         iw_layout = QHBoxLayout(item_widget)
-        iw_layout.setContentsMargins(4, 4, 4, 4)
+        iw_layout.setContentsMargins(0, 0, 0, 0)
         iw_layout.setSpacing(10)
 
         # ----------------------------------------------------
@@ -613,7 +545,7 @@ class ChannelPanelManager:  # 面板管理器
         logo_box.setFixedSize(36, 26)
         logo_box.setAlignment(Qt.AlignmentFlag.AlignCenter)
         logo_box.setStyleSheet("background: transparent; border: none;")
-        logo_box.setText("")  # 🎯 徹底清空 "📺" Emoji
+        logo_box.setText("")
 
         import urllib.parse
         # 1. 多重相容 M3U 的台徽欄位 (logo / tvg-logo / tvg_logo)
@@ -625,7 +557,7 @@ class ChannelPanelManager:  # 面板管理器
             clean_name = re.sub(r'(?i)(4k|fhd|hd|sd|hevc|60fps|\[.*?\]|\(.*?\))', '', raw_name).strip()
             
             if clean_name:
-                logo_templates = getattr(self.win, 'current_logo_template', '') or "https://live.fanmingming.cn/tv/{name}.png"
+                logo_templates = self.win.current_logo_template or "https://live.fanmingming.cn/tv/{name}.png"
                 for tpl in logo_templates.split(','):
                     tpl = tpl.strip()
                     if '{name}' in tpl:
@@ -648,22 +580,29 @@ class ChannelPanelManager:  # 面板管理器
                     logo_box.setPixmap(rounded_pix)
                     pixmap_loaded = True
             else:
-                # 🎯 將包含中文/空格的網址安全編碼 (避免 urllib 請求中文檔名時崩潰)
-                try:
-                    safe_logo_url = urllib.parse.quote(logo_url, safe=':/?&=#%')
-                    req = urllib.request.Request(safe_logo_url, headers={'User-Agent': 'Mozilla/5.0'})
-                    with urllib.request.urlopen(req, timeout=3) as resp:
-                        data = resp.read()
-                        with open(logo_path, "wb") as f:
-                            f.write(data)
-                        pixmap = QPixmap()
-                        pixmap.loadFromData(data)
-                        if not pixmap.isNull():
-                            rounded_pix = get_rounded_pixmap(pixmap, QSize(36, 26), radius=5)
-                            logo_box.setPixmap(rounded_pix)
-                            pixmap_loaded = True
-                except Exception:
-                    pass
+                # 🎯 防重鎖：避免快速滾動時，同時啟動幾百個Logo線程引發卡頓
+                if not hasattr(self, '_logo_download_set'):
+                    self._logo_download_set = set()
+                if logo_url not in self._logo_download_set:
+                    self._logo_download_set.add(logo_url)
+                    if not hasattr(self, '_logo_threads'):
+                        self._logo_threads = []
+                        
+                    worker = LogoFetchThread(logo_url, logo_path, logo_box)
+                    
+                    def _on_logo_done(p, b):
+                        try:
+                            pix = QPixmap(p)
+                            if not pix.isNull():
+                                b.setPixmap(get_rounded_pixmap(pix, QSize(36, 26), radius=5))
+                        except RuntimeError:
+                            pass
+                        finally:
+                            self._logo_download_set.discard(logo_url)
+
+                    worker.finished_signal.connect(_on_logo_done)
+                    self._logo_threads.append(worker)
+                    worker.start()
 
         # 🎯 當台徽無法加載或未找到時：Fallback 使用 TV SVG 圖示，背景保持隱形
         if not pixmap_loaded:
@@ -736,40 +675,32 @@ class ChannelPanelManager:  # 面板管理器
             }
         """)
 
-        # 優先使用 self.win._set_btn_svg_icon 確保與點擊切換 100% 同步
+        # 🎯 極簡修復：完全統一使用主視窗嘅圖示管理器，徹底鎖死兩個狀態
+        star_btn.setText("")
+        star_btn.setIcon(QIcon())
+        
         if hasattr(self.win, '_set_btn_svg_icon'):
             self.win._set_btn_svg_icon(star_btn, "star_filled" if is_fav else "star_outline")
-        elif IconManager:
-            try:
-                star_color = "#f59e0b" if is_fav else "#64748b"
-                star_icon = IconManager.get_icon("star", color=star_color, size=18)
-                star_btn.setIcon(star_icon)
-                star_btn.setIconSize(QSize(18, 18))
-            except Exception:
-                pass
 
         star_btn.clicked.connect(lambda checked=False, target_ch=ch, btn=star_btn: self.win.on_star_clicked(target_ch, btn))
 
         iw_layout.addWidget(star_btn)
         return item_widget
         
-        
+#=============================================================================================
+    
     def load_live_channels(self, reset=True):
         
         # 根據「播放網址 (url)」精準去重，確保保留相同名稱但不同線路的頻道
         if hasattr(self, 'channels') and isinstance(self.channels, list):
             self.channels = list({ch.get('url'): ch for ch in self.channels if isinstance(ch, dict) and ch.get('url')}.values())
             
-        if getattr(self.win, 'channel_list_mode', 'live') != 'live':
+        if self.win.channel_list_mode != 'live':
             return
 
         # 1. 取得頻道資料（多重路徑相容，確保拿得到數據）
-        all_data = (
-            getattr(self.win, 'all_channels_data', []) or 
-            getattr(self.win, 'channels', []) or 
-            getattr(self, 'channels', []) or 
-            getattr(self, 'all_channels', [])
-        )
+        # 新代碼 (直接攞，因為我哋已經保證佢存在)
+        all_data = self.win.all_channels_data or self.win.channels
 
         # 2. 當 reset=True 或快取尚未建立時，重新過濾與整理頻道
         if reset or not hasattr(self.win, 'filtered_channels_cache') or not self.win.filtered_channels_cache:
@@ -778,10 +709,10 @@ class ChannelPanelManager:  # 面板管理器
             self.win.filtered_channels_cache = []
 
             # 同步數據至主視窗屬性，避免其他元件找不到
-            if all_data and not getattr(self.win, 'all_channels_data', []):
+            if all_data and not self.win.all_channels_data:
                 self.win.all_channels_data = all_data
 
-            if not getattr(self.win, 'm3u_sources', []) and not all_data:
+            if not self.win.m3u_sources and not all_data:
                 item = QListWidgetItem("⚠️ 未有任何訂閱源，請打開文件夾添加 M3U 網址")
                 item.setFlags(Qt.ItemFlag.NoItemFlags)
                 item.setSizeHint(QSize(0, 62))
@@ -789,28 +720,27 @@ class ChannelPanelManager:  # 面板管理器
                 return
 
             search_keyword = self.win.search_box.text().strip().lower() if self.win.search_box.text() else ""
-            quality_filter = getattr(self.win, 'current_quality', '全部')
-            group_filter = getattr(self.win, 'current_group_filter', '全部分組')
+            quality_filter = self.win.current_quality
+            group_filter = self.win.current_group_filter
 
             if not all_data and not search_keyword:
             # 🎯 優先讀取主視窗權威標誌 is_m3u_loading，徹底消除微秒級狀態不一致
-                is_fetching = getattr(self.win, 'is_m3u_loading', False)
+                is_fetching = self.win.is_m3u_loading
                 
                 if not is_fetching:
                     # 備用：檢查背景線程
                     for worker_attr in ['m3u_worker', 'fetch_worker', 'm3u_fetch_worker']:
-                        worker = getattr(self.win, worker_attr, None) or getattr(self, worker_attr, None)
+                        worker = getattr(self.win, worker_attr, None) or getattr(self, worker_attr, None)  # worker = getattr(self.win, worker_attr, None) —— 因為 worker_attr 係變數（會變成 m3u_worker 或者 fetch_worker），唔可以用點（.）直接訪問。
                         if worker and hasattr(worker, 'isRunning') and worker.isRunning():
                             is_fetching = True
                             break
 
-                loading_bar = getattr(self.win, 'loading_bar', None)
-                if is_fetching:
+                loading_bar = self.win.loading_bar
+                # 🎯 即使 is_m3u_loading 為 False，只要有訂閱源，啟動時仍顯示「加載中」而非「加載失敗」
+                if is_fetching or self.win.m3u_sources:
                     msg = "⏳ 正在加載 M3U 頻道清單，請稍候..."
                 else:
                     msg = "❌ 加載失敗，請重啟播放器或檢查網絡"
-                    if loading_bar:
-                        loading_bar.setVisible(False)
 
                 item = QListWidgetItem(msg)
                 item.setFlags(Qt.ItemFlag.NoItemFlags)
@@ -833,13 +763,13 @@ class ChannelPanelManager:  # 面板管理器
 
                 self.win.filtered_channels_cache.append(ch)
 
-            sort_mode = getattr(self.win, 'current_sort_mode', 'default')
+            sort_mode = self.win.current_sort_mode
             if sort_mode == "name_asc":
                 self.win.filtered_channels_cache.sort(key=lambda x: x.get('name', '').lower() if isinstance(x, dict) else str(x))
             elif sort_mode == "name_desc":
                 self.win.filtered_channels_cache.sort(key=lambda x: x.get('name', '').lower() if isinstance(x, dict) else str(x), reverse=True)
             elif sort_mode == "latency_asc":
-                latencies = getattr(self.win, 'channel_latencies', {})
+                latencies = self.win.channel_latencies
                 def _get_sort_key(ch):
                     url = ch.get('url', '') if isinstance(ch, dict) else ''
                     ms = latencies.get(url, 999999)
@@ -847,7 +777,7 @@ class ChannelPanelManager:  # 面板管理器
                 self.win.filtered_channels_cache.sort(key=_get_sort_key)
 
         # 3. 分頁增量繪製 UI 列表
-        fav_list = getattr(self.win, 'favorites_list', [])
+        fav_list = self.win.favorites_list
         fav_urls = {f['url'] for f in fav_list if isinstance(f, dict) and 'url' in f}
         batch_size = 30
         start_idx = self.win.rendered_channel_count
@@ -864,7 +794,7 @@ class ChannelPanelManager:  # 面板管理器
 
             item_widget = self._get_channel_row_widget(ch, i, is_fav)
 
-            latencies = getattr(self.win, 'channel_latencies', {})
+            latencies = self.win.channel_latencies
             if url in latencies:
                 self.update_latency_badge(item_widget, latencies[url])
 
@@ -882,10 +812,12 @@ class ChannelPanelManager:  # 面板管理器
         self.win.rendered_channel_count = end_idx
         self.win.channel_list.setUpdatesEnabled(True)
 
-    
+#=============================================================================================
+
     def filter_channels(self):
         self.load_live_channels(reset=True)
         
+#=============================================================================================
 
     def switch_channel_view(self, mode, clicked_btn=None):
         if clicked_btn and hasattr(self.win, 'update_sidebar_btn_styles'):
@@ -904,7 +836,7 @@ class ChannelPanelManager:  # 面板管理器
             self.win.panel_title.setText("我的收藏")
             self.win.search_box.setVisible(False)
             self.win.filter_container.setVisible(False)
-            fav_list = getattr(self.win, 'favorites_list', [])
+            fav_list = self.win.favorites_list
             if not fav_list:
                 item = QListWidgetItem("暫無收藏頻道")
                 item.setFlags(Qt.ItemFlag.NoItemFlags)
@@ -930,32 +862,29 @@ class ChannelPanelManager:  # 面板管理器
             
             self.win.panel_title.setText(title)
             self.win.search_box.setVisible(False)
-            self.win.filter_container.setVisible(True)  # 確保顯示排序選單
-            
-            source_list = getattr(self.win, data_list_name, [])
-            fav_list = getattr(self.win, 'favorites_list', [])
-            all_data = getattr(self.win, 'all_channels_data', []) or getattr(self.win, 'channels', [])
-            
-            # 最近播放限制前 20 筆，本地媒體不限制數量
-            if is_history:
-                source_list = source_list[:20]
-                setattr(self.win, data_list_name, source_list)
+            self.win.filter_container.setVisible(True)
 
-            # 根據選單設定的 current_sort_mode 進行自然排序
-            sort_mode = getattr(self.win, 'current_sort_mode', 'default')
+            # 🎯 極簡核心：直接攞原始數據，並強制「只睇前20條」（完美復刻v28速度）
+            raw_list = getattr(self.win, data_list_name, [])
+            display_list = raw_list[:20]
+            
+            fav_list = self.win.favorites_list
+            all_data = self.win.all_channels_data or self.win.channels
+
+            # 🎯 只對呢20條排序（絕對唔會卡）
+            sort_mode = self.win.current_sort_mode
             if sort_mode == 'name_asc':
-                source_list = sorted(source_list, key=lambda x: natural_sort_key(x.get('name', '') if isinstance(x, dict) else str(x)))
+                display_list = sorted(display_list, key=lambda x: natural_sort_key(x.get('name', '') if isinstance(x, dict) else str(x)))
             elif sort_mode == 'name_desc':
-                source_list = sorted(source_list, key=lambda x: natural_sort_key(x.get('name', '') if isinstance(x, dict) else str(x)), reverse=True)
-                
-            # 修正縮排：渲染迴圈移出 elif，確保所有排序模式皆能正常顯示
-            for idx, ch in enumerate(source_list):
+                display_list = sorted(display_list, key=lambda x: natural_sort_key(x.get('name', '') if isinstance(x, dict) else str(x)), reverse=True)
+
+            for idx, ch in enumerate(display_list):
                 url = ch.get('url', '') if isinstance(ch, dict) else str(ch)
                 fav_match = next((f for f in fav_list if isinstance(f, dict) and f.get('url') == url), {})
                 all_match = next((c for c in all_data if isinstance(c, dict) and c.get('url') == url), {})
 
                 merged_ch = all_match if all_match else (fav_match if fav_match else (ch if isinstance(ch, dict) else {'name': str(ch), 'url': url}))
-                item_widget = self._get_channel_row_widget(merged_ch, idx, url in {f.get('url') for f in fav_list if isinstance(f, dict)})
+                item_widget = self._get_channel_row_widget(merged_ch, idx, url in {f['url'] for f in fav_list if isinstance(f, dict)})
 
                 layout = item_widget.layout()
                 if layout.count() > 2:
@@ -972,15 +901,17 @@ class ChannelPanelManager:  # 面板管理器
                 item.setSizeHint(QSize(0, 65))
                 item.setData(Qt.ItemDataRole.UserRole, url)
                 item.setData(Qt.ItemDataRole.UserRole + 1, merged_ch)
-                
+
                 item_widget.mousePressEvent = lambda event, itm=item: self.on_channel_item_clicked(itm)
-                
+
                 self.win.channel_list.addItem(item)
                 self.win.channel_list.setItemWidget(item, item_widget)
                 if layout.count() > 2:
                     del_btn = layout.itemAt(layout.count() - 1).widget()
                     if del_btn:
                         del_btn.clicked.connect(lambda checked=False, target_ch=ch, item_ref=item, m=mode: self.remove_history_or_local_item(target_ch, item_ref, m))
+
+#=============================================================================================
 
     def remove_history_or_local_item(self, ch, item, mode):
         """移除單筆紀錄 ( history / local )"""
@@ -991,12 +922,14 @@ class ChannelPanelManager:  # 面板管理器
         row = self.win.channel_list.row(item)
         if row >= 0:
             self.win.channel_list.takeItem(row)
-        if mode == 'history' and hasattr(self.win, 'save_history'):
+        if mode == 'history':
             self.win.save_history()
+
+#=============================================================================================
 
     def show_channel_list_context_menu(self, pos):
         """右鍵菜單：一鍵清空"""
-        mode = getattr(self.win, 'channel_list_mode', 'live')
+        mode = self.win.channel_list_mode
         if mode not in ["history", "local"]:
             return
 
@@ -1007,13 +940,17 @@ class ChannelPanelManager:  # 面板管理器
         menu.addAction(action)
         menu.exec(self.win.channel_list.mapToGlobal(pos))
 
+#=============================================================================================
+
     def clear_playlist(self, mode):
         """執行清空」"""
         attr_name = 'history_sources' if mode == 'history' else 'local_media_list'
         setattr(self.win, attr_name, [])
-        if mode == 'history' and hasattr(self.win, 'save_history'):
+        if mode == 'history':
             self.win.save_history()
         self.switch_channel_view(mode)
+
+#=============================================================================================
 
     def add_local_media_record(self, name_or_item, url: str = None):
         """加入本地媒體紀錄 (全相容模式：支援單檔路徑、字典、列表)"""
@@ -1061,6 +998,7 @@ class ChannelPanelManager:  # 面板管理器
 
         self.switch_channel_view("local", target_btn)
             
+#=============================================================================================
 
     def load_epg_data(self, epg_urls_str):
         print(f"📡 [DEBUG] 收到 EPG 載入請求，原始網址字串: '{epg_urls_str}'")
@@ -1098,15 +1036,6 @@ class ChannelPanelManager:  # 面板管理器
         except RuntimeError:
             self.epg_worker = None
 
-        self.epg_worker = EPGWorker(urls)
-
-        def _on_epg_loaded(data):
-            print(f"✅ [DEBUG] 主線程收到 EPG 回傳，總 Key 數: {len(data)}")
-            self.epg_data = data
-            if hasattr(self.win, 'epg_data'):
-                self.win.epg_data = data
-            self.load_live_channels(reset=True)
-
-        self.epg_worker.finished_signal.connect(_on_epg_loaded)
-        print("✅ [DEBUG] EPG 背景線程已成功 start()")
-        self.epg_worker.start()
+                # 直接呼叫主視窗的 EPG 下載函數（使用 epg_manager 的 SQLite 流）
+        if hasattr(self.win, 'load_epg') and urls:
+            self.win.load_epg(urls[0])
