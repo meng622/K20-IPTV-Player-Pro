@@ -1,9 +1,8 @@
 # player_engine.py
 from config import *
+from PyQt6 import sip
 from config import _script_dir
-from PyQt6.QtCore import QAbstractNativeEventFilter, QCoreApplication
-import ctypes
-from ctypes import wintypes # [關鍵修復] 補上 s (wintypes)
+from ctypes import wintypes
 
 # ==================== libmpv ctypes 封裝 ====================
 if getattr(sys, 'frozen', False):
@@ -17,8 +16,6 @@ _libmpv_path = os.path.join(_base_path, "libmpv-2.dll")
 WM_LBUTTONDBLCLK = 0x0203
 WM_MOUSEMOVE = 0x0200
 
-from PyQt6 import sip  # 務必確保在檔案頂部或此處導入 sip 用於檢查 C++ 物件存活狀態
-
 class MpvEventFilter(QObject):
     """安全版的 Qt 事件監聽器：增加 sip 檢查防範 RuntimeError"""
     def __init__(self, target_widget):
@@ -26,10 +23,8 @@ class MpvEventFilter(QObject):
         self.target_widget = target_widget
 
     def eventFilter(self, obj, event):
-        # [關鍵修復 1] 防護：檢查 target_widget 的 C++ 底層物件是否已被 C++ 釋放
         if not self.target_widget or sip.isdeleted(self.target_widget):
             return False
-
         if isinstance(obj, QWidget):
             try:
                 if self.target_widget.isAncestorOf(obj) or obj == self.target_widget:
@@ -38,104 +33,27 @@ class MpvEventFilter(QObject):
                         return True
                     elif event.type() == QEvent.Type.MouseMove:
                         self.target_widget.requestShowControls.emit()
-            except RuntimeError:
-                pass
+            except RuntimeError as e:
+                print(f"[MpvEventFilter] RuntimeError: {e}")
         return super().eventFilter(obj, event)
-
-class LoadingSpinner(QWidget):
-    # 轉圈圖示
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
-        self.setFixedSize(160, 160)
-        self._angle = 0
-        self._timer = QTimer(self)
-        self._timer.timeout.connect(self._rotate)
-
-    def _rotate(self):
-        self._angle = (self._angle + 30) % 360
-        self.update()
-        
-
-    def start(self):
-        self.show()
-        self._timer.start(50)
-
-    def stop(self):
-        self._timer.stop()
-        self.hide()
-
-    def paintEvent(self, event):
-        painter = QPainter(self)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        rect = self.rect().adjusted(5, 5, -5, -5)
-        pen = QPen(QColor(255, 255, 255, 200), 4)
-        painter.setPen(pen)
-        painter.drawArc(rect, -self._angle * 16, 280 * 16)
-
-
-class EventOverlay(QWidget):
-    """終極怪招：利用 ToolTip 視窗屬性搶奪最高 Z-Order 置頂轉圈圈"""
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        # ToolTip 屬性在 Windows 底層擁有極高繪製優先級，mpv 絕對蓋不住
-        self.setWindowFlags(
-            Qt.WindowType.ToolTip | 
-            Qt.WindowType.FramelessWindowHint |
-            Qt.WindowType.WindowTransparentForInput
-        )
-        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
-        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
-        
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
-        
-        self.spinner = LoadingSpinner(self)
-        layout.addWidget(self.spinner, 0, Qt.AlignmentFlag.AlignCenter)
-        self.spinner.hide()
-
-    def paintEvent(self, event):
-        if self.spinner.isVisible():
-            painter = QPainter(self)
-            painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-            # 畫半透明黑底
-            painter.fillRect(self.rect(), QColor(0, 0, 0, 80))
-
-    def start_loading(self):
-        if self.parentWidget():
-            # 強制更新視窗座標到螢幕全域位置
-            p = self.parentWidget()
-            global_pos = p.mapToGlobal(p.rect().topLeft())
-            self.setGeometry(global_pos.x(), global_pos.y(), p.width(), p.height())
-            
-        self.spinner.start()
-        self.show()
-        self.raise_()
-        self.update()
-
-    def stop_loading(self):
-        self.spinner.stop()
-        self.hide()
-        self.update()
-        self.spinner.stop()
-        self.hide()
-        self.update()
 
 
 class MpvEmbedWidget(QWidget):
     requestFullscreenToggle = pyqtSignal()
     requestShowControls = pyqtSignal()
     errorOccurred = pyqtSignal(str)          
-    channelTimeout = pyqtSignal(str)         
-
+    channelTimeout = pyqtSignal(str)
+    pauseChanged = pyqtSignal(bool)
+    
     MPV_FORMAT_DOUBLE = 5
     MPV_FORMAT_STRING = 1
 
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, cache_mb=100):
         super().__init__(parent)
+        self.cache_mb = cache_mb  # 儲存緩存設定
         self.setStyleSheet("background-color: #000000;")
         self.setMouseTracking(True)
-
+        
         try:
             self._lib = ctypes.CDLL(_libmpv_path)
         except OSError as e:
@@ -145,19 +63,16 @@ class MpvEmbedWidget(QWidget):
         self._paused = False
         self._mpv_ready = False
         self.hw_enabled = True
+        self.is_multi_mode = False
         
+        # 僅保留超時計時器（用於顯示連線逾時）
         self._load_timer = QTimer(self)
         self._load_timer.setSingleShot(True)
         self._load_timer.timeout.connect(self._check_channel_alive)
         self._current_url = ""
-
         self._setup_api()
 
-        # 1. 建立純粹負責 Spinner 的 Overlay
-        self._overlay = EventOverlay(self)
-        self._overlay.setGeometry(self.rect())
-
-        # 2. 安全安裝 Qt 層級事件過濾器
+        # 安全安裝 Qt 層級事件過濾器
         self._event_filter = MpvEventFilter(self)
         QCoreApplication.instance().installEventFilter(self._event_filter)
 
@@ -213,7 +128,7 @@ class MpvEmbedWidget(QWidget):
             self._set_option("input-default-bindings", "no")
             self._set_option("input-vo-keyboard", "no")
             self._set_option("osc", "no")
-            self._set_option("osd-level", "1")
+            self._set_option("osd-level", "0")
             self._set_option("force-window", "immediate")
             self._set_option("keep-open", "yes")
             self._set_option("sub-auto", "fuzzy")
@@ -221,14 +136,57 @@ class MpvEmbedWidget(QWidget):
             self._set_option("demuxer-lavf-o", "reconnect=1,reconnect_streamed=1,reconnect_delay_max=5")
             self._set_option("network-timeout", "10")
 
-            if self.hw_enabled:
+            if self.hw_enabled and not self.is_multi_mode:
                 self._set_option("hwdec", "auto-safe")
                 self._set_option("gpu-context", "d3d11")
             else:
                 self._set_option("hwdec", "no")
 
+            # ===== 直播 / 點播 最大化緩存設定 =====
+            cache_size_mb = getattr(self, 'cache_mb', 100)
+            
+            # 1. 基本開關
+            self._set_option("cache", "yes")
+            
+            # 2. 核心：設定緩存時間（秒）
+            cache_secs = 120   # 預設 2 分鐘
+            if cache_size_mb >= 500:
+                cache_secs = 300   # 5 分鐘
+            elif cache_size_mb >= 200:
+                cache_secs = 180   # 3 分鐘
+            self._set_option("cache-secs", str(cache_secs))
+            
+            # 3. 向後緩存（讓你拉回更早時間）
+            self._set_option("demuxer-max-back-bytes", f"{cache_size_mb * 2}M")
+            
+            # 4. demuxer 預讀秒數
+            self._set_option("demuxer-readahead-secs", "15")
+            
+            # 5. 允許 seek
+            self._set_option("demuxer-seekable-cache", "yes")
+            
+            # 6. 緩存行為優化
+            self._set_option("cache-pause", "no")
+            self._set_option("cache-pause-initial", "yes")
+            
+            # 7. demuxer 緩衝上限（元數據清單）
+            self._set_option("demuxer-max-bytes", f"{cache_size_mb * 4}M")
+            
+            # 8. 確認設定
+            cache_secs_value = self.get_property_string("cache-secs")
+            print(f"[MpvEngine] 當前 cache-secs 設定：{cache_secs_value} 秒")
+            
             self._set_option("vd-lavc-threads", "2")
-            self._set_option("demuxer-max-bytes", "10M")
+            
+            self._set_option("ytdl", "yes")
+            self._set_option("ytdl-format", "bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best")
+            _ytdl_path = os.path.join(_base_path, 'yt-dlp.exe').replace('\\', '/')
+            _ffmpeg_dir = _base_path.replace('\\', '/')
+            self._set_option("script-opts", f"ytdl_path={_ytdl_path},ytdl-ffmpeg-location={_ffmpeg_dir}")
+            
+            if _ffmpeg_dir not in os.environ.get("PATH", ""):
+                os.environ["PATH"] = _ffmpeg_dir + os.pathsep + os.environ.get("PATH", "")
+            
             self._set_option("wid", wid)
 
             ret = self._lib.mpv_initialize(self._ctx)
@@ -236,6 +194,11 @@ class MpvEmbedWidget(QWidget):
                 raise RuntimeError(f"mpv_initialize failed: {ret}")
             
             self._mpv_ready = True
+            
+            # 打印當前 cache-size 設定值（用於確認）
+            cache_size_value = self.get_property_string("cache-size")
+            print(f"[MpvEngine] 當前 cache-size 設定: {cache_size_value}")
+            
         except Exception as e:
             print(f"[MpvEngine] 初始化異常: {e}")
             self._ctx = None
@@ -266,33 +229,30 @@ class MpvEmbedWidget(QWidget):
 
         if not self._ctx:
             self._init_mpv()
-        
         if not self._ctx:
             return
 
         self._paused = False
         self._current_url = url
-        
-        # [關鍵修正] 啟動加載轉圈
-        self._overlay.start_loading()
         self._show_osd_text("載入串流中...", 6000)
-        
         QApplication.processEvents()
 
         try:
             cmd = f'loadfile "{url}"'.encode('utf-8')
             self._lib.mpv_command_string(self._ctx, cmd)
             QTimer.singleShot(2000, self._enable_subs)
-            self._load_timer.start(5000)
-            
+
+            is_yt = "youtube.com" in url.lower() or "youtu.be" in url.lower()
+            timeout_ms = 12000 if is_yt else 5000
+            self._load_timer.start(timeout_ms)
+
+            self._set_property_string("pause", "no")
         except Exception as e:
             print(f"[MpvEngine] 播放指令執行失敗: {e}")
-            self._overlay.stop_loading()
             self.errorOccurred.emit(str(e))
 
     def _check_channel_alive(self):
         if not self._ctx:
-            self._overlay.stop_loading()
             return
         
         time_pos = self.get_time_pos()
@@ -302,11 +262,16 @@ class MpvEmbedWidget(QWidget):
         if idle_state == "yes" or (time_pos == 0 and duration == 0):
             print(f"[MpvEngine] 警告：頻道可能已失效或連線逾時 -> {self._current_url}")
             self._show_osd_text("頻道連線逾時 / 已失效", 3000)
-            self._overlay.stop_loading()
             self.channelTimeout.emit(self._current_url)
         else:
             self._show_osd_text("", 10)
-            self._overlay.stop_loading()
+            
+            # YouTube 自動更新標題
+            if "youtube.com" in self._current_url.lower() or "youtu.be" in self._current_url.lower():
+                real_title = self.get_media_title()
+                if real_title:
+                    parent_win = self.window()
+                    parent_win.update_header_title(custom_title=f"[YouTube] - {real_title}")
 
     def _enable_subs(self):
         if self._ctx and self._mpv_ready:
@@ -321,6 +286,7 @@ class MpvEmbedWidget(QWidget):
             self._paused = True
             try:
                 self._lib.mpv_command_string(self._ctx, b"set pause yes")
+                self.pauseChanged.emit(True)
             except Exception:
                 pass
 
@@ -329,6 +295,7 @@ class MpvEmbedWidget(QWidget):
             self._paused = False
             try:
                 self._lib.mpv_command_string(self._ctx, b"set pause no")
+                self.pauseChanged.emit(False)
             except Exception:
                 pass
 
@@ -362,15 +329,15 @@ class MpvEmbedWidget(QWidget):
             return 100.0
 
     def stop(self):
-        if self._load_timer.isActive():
-            self._load_timer.stop()
+        print("[MpvEngine] stop() 被調用")
+        self._load_timer.stop()
         self._show_osd_text("", 10)
-        self._overlay.stop_loading()
         if self._ctx:
             try:
                 self._lib.mpv_command_string(self._ctx, b"stop")
-            except Exception:
-                pass
+                self._lib.mpv_command_string(self._ctx, b"set vid 0")   # 強制變黑
+            except Exception as e:
+                print(f"[MpvEngine] stop 命令失敗: {e}")
 
     @property
     def is_paused(self):
@@ -380,8 +347,8 @@ class MpvEmbedWidget(QWidget):
         if not self._ctx:
             return 0
         try:
-            val = c_double(0)
-            ret = self._lib.mpv_get_property(self._ctx, b"time-pos", self.MPV_FORMAT_DOUBLE, byref(val))
+            val = ctypes.c_double(0)
+            ret = self._lib.mpv_get_property(self._ctx, b"time-pos", self.MPV_FORMAT_DOUBLE, ctypes.byref(val))
             return val.value if ret >= 0 else 0
         except Exception:
             return 0
@@ -390,11 +357,22 @@ class MpvEmbedWidget(QWidget):
         if not self._ctx:
             return 0
         try:
-            val = c_double(0)
-            ret = self._lib.mpv_get_property(self._ctx, b"duration", self.MPV_FORMAT_DOUBLE, byref(val))
+            val = ctypes.c_double(0)
+            ret = self._lib.mpv_get_property(self._ctx, b"duration", self.MPV_FORMAT_DOUBLE, ctypes.byref(val))
             return val.value if ret >= 0 else 0
         except Exception:
             return 0
+
+    def get_media_title(self):
+        title = self.get_property_string("media-title")
+        return title if title else ""
+    
+    def toggle_stats(self):
+        if self._ctx and self._mpv_ready:
+            try:
+                self._lib.mpv_command_string(self._ctx, b"script-binding stats/display-stats-toggle")
+            except Exception as e:
+                print(f"[MpvEngine] 切換 Stats 失敗: {e}")
 
     def screenshot(self, path=None):
         if self._ctx:
@@ -402,7 +380,6 @@ class MpvEmbedWidget(QWidget):
                 snapshots_dir = os.path.join(_script_dir, "snapshots")
                 os.makedirs(snapshots_dir, exist_ok=True)
                 
-                # [強制覆寫] 確保絕對不會掉到外面去
                 if path:
                     filename = os.path.basename(path)
                 else:
@@ -454,15 +431,9 @@ class MpvEmbedWidget(QWidget):
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
-        if hasattr(self, '_overlay') and self._overlay and self._overlay.isVisible():
-            global_pos = self.mapToGlobal(self.rect().topLeft())
-            self._overlay.setGeometry(global_pos.x(), global_pos.y(), self.width(), self.height())
 
     def moveEvent(self, event):
         super().moveEvent(event)
-        if hasattr(self, '_overlay') and self._overlay and self._overlay.isVisible():
-            global_pos = self.mapToGlobal(self.rect().topLeft())
-            self._overlay.setGeometry(global_pos.x(), global_pos.y(), self.width(), self.height())
 
     def showEvent(self, event):
         super().showEvent(event)
@@ -470,8 +441,7 @@ class MpvEmbedWidget(QWidget):
             QTimer.singleShot(100, self._init_mpv)
 
     def closeEvent(self, event):
-        if self._load_timer.isActive():
-            self._load_timer.stop()
+        self._load_timer.stop()
         if self._ctx:
             try:
                 self._lib.mpv_terminate_destroy(self._ctx)
