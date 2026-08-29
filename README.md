@@ -30,7 +30,7 @@
 ### 特別致謝
 
 * 本專案基於 **K20 Player** 基礎進行二次開發。
-* 特別感謝 **Gemini AI** 在代碼重構、Bug 定位與邏輯優化上的全力協助。
+* 特別感謝 **Gemini AI** 與 **DeepSeek AI** 在代碼重構、Bug 定位與邏輯優化上的全力協助。
 
 ### 許可證
 
@@ -62,7 +62,7 @@
 ### Acknowledgments
 
 * Based on the original **K20 Player**.
-* Co-developed and optimized with **Gemini AI** for modular architecture refactoring and debugging.
+* Co-developed and optimized with **Gemini AI** and **DeepSeek AI** for modular architecture refactoring and debugging.
 
 ### License
 
