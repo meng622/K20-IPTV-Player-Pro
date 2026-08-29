@@ -140,7 +140,7 @@ class CustomSplitterHandle(QSplitterHandle):
 
         # 🎯 從主視窗動態獲取當前主題配色 (魅紫/霓藍/翡翠/鈦空灰)
         main_win = self.window()
-        c = getattr(main_win, 'current_theme_config', {})
+        c = main_win.current_theme_config
         
         # 抓取主題的邊框色與高亮強調色 (抓不到時預設備用色)
         theme_border = c.get('border', '#8b5cf6')
@@ -181,6 +181,11 @@ class CustomSplitter(QSplitter):
 class RoundedMenu(QMenu):
     def __init__(self, parent=None):  # 初始化選單
         super().__init__(parent)  # 呼叫父類初始化
+        
+         # 加入以下兩行護身符
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)  # 確保 Menu 自己唔會亂搶焦點
+        self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating, False)  # 彈出時唔好搞亂 Win32 活躍視窗
+        
         # 關鍵：啟用背景透明，解決圓角黑邊/方角問題
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)  # 設定背景透明
         self.setWindowFlags(self.windowFlags() | Qt.WindowType.FramelessWindowHint)  # 隱藏原生邊框
