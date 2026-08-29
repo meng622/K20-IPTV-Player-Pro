@@ -1,19 +1,21 @@
 # screen_manager.py
-from PyQt6.QtCore import QObject, QEvent, Qt
-from PyQt6.QtWidgets import QMenu, QLabel
+
 from config import *
+
+from widgets import RoundedMenu
 
 class ScreenManager(QObject):
     def __init__(self, main_window):
         super().__init__(main_window)
         self.win = main_window
+        self.current_menu = None   # <--- 新增呢行
         # 綁定相容接口，防止 main_window 呼叫舊方法時報錯
         self.win._event_filter_install_for_widgets = self.install_event_filters
 
     def install_event_filters(self):
         """🎯 自動為所有分屏框架與播放組件安裝事件過濾器"""
-        frames = getattr(self.win, 'video_frames', [])
-        widgets = getattr(self.win, 'video_widgets', [])
+        frames = self.win.video_frames
+        widgets = self.win.video_widgets
 
         for frame in frames:
             frame.removeEventFilter(self)
@@ -38,7 +40,7 @@ class ScreenManager(QObject):
                 if watched == w or watched == f:
                     target_idx = i
                     break
-                if w and hasattr(w, 'isAncestorOf') and w.isAncestorOf(watched):
+                if w and w.isAncestorOf(watched):
                     target_idx = i
                     break
                 if f and hasattr(f, 'isAncestorOf') and f.isAncestorOf(watched):
@@ -62,16 +64,22 @@ class ScreenManager(QObject):
         return super().eventFilter(watched, event)
 
     def set_screen_layout(self, count):
+        # 🎯 通知所有播放器依家係多屏定單屏模式
+        for w in self.win.video_widgets:
+            w.is_multi_mode = (count > 1)
         """🎯 設定分屏數量 (1~4屏) 並重新排版與掛載監聽"""
         self.win.setUpdatesEnabled(False)
         try:
             for i in range(len(self.win.video_widgets)):
                 if i >= count:
                     widget = self.win.video_widgets[i]
-                    mpv_inst = getattr(widget, 'mpv', None) or getattr(widget, 'player', None)
+                    mpv_inst = widget.mpv
                     if mpv_inst:
                         try:
-                            mpv_inst.command('loadfile', '', 'replace')
+                            if hasattr(widget, 'stop'):
+                                widget.stop()
+                            else:
+                                mpv_inst.command('stop')
                         except Exception:
                             pass
                     widget.has_media = False
@@ -104,12 +112,19 @@ class ScreenManager(QObject):
         self.update_screen_borders()
         self._sync_audio_focus()
         self.install_event_filters()
+        # 🎯 B4終極修復：錯峰加載，防止同時4路網絡請求衝爆底層mpv
+        if count > 1:
+            for idx, w in enumerate(self.win.video_widgets):
+                if w.has_media and not w._current_url:
+                    continue
+                # 用QTimer延遲啟動後面嘅屏幕，避免同時間發起4個loadfile
+                QTimer.singleShot(idx * 200, lambda widx=idx: self.win.video_widgets[widx].play(self.win.video_widgets[widx]._current_url) if hasattr(self.win.video_widgets[widx], '_current_url') and self.win.video_widgets[widx]._current_url else None)
 
     def update_screen_borders(self):
         """🎯 更新分屏邊框高亮樣式與頂欄/頻道清單連動"""
         visible_frames = [f for f in self.win.video_frames if f.isVisible()]
         visible_count = len(visible_frames)
-        accent_color = getattr(self.win, 'current_theme_accent', '#8b5cf6')
+        accent_color = self.win.current_theme_accent
 
         for i, frame in enumerate(self.win.video_frames):
             if frame.isVisible():
@@ -144,11 +159,9 @@ class ScreenManager(QObject):
             clean_name = ch_name.strip() if ch_name else ""
             has_media = getattr(w, 'has_media', False) or bool(ch_url or clean_name)
 
-            top_text = f"[直播流] - {clean_name}" if (has_media and clean_name) else "[直播流] - "
-            for lbl in self.win.findChildren(QLabel):
-                if lbl.text() and "[直播流]" in lbl.text():
-                    lbl.setText(top_text)
-                    break
+            # 直接讓 main_window 統一計算包含 EPG 的最新標題，防止舊邏輯覆蓋
+            if hasattr(self.win, 'update_header_title'):
+                self.win.update_header_title(channel_name=clean_name)
 
             if clist and clist.isVisible():
                 matched_item = None
@@ -178,47 +191,127 @@ class ScreenManager(QObject):
                 clist.blockSignals(False)
 
     def _sync_audio_focus(self):
-        """🎯 同步音量焦點 (獨佔播放當前焦點屏的聲音)"""
+        """🎯 B5終極修復：採用標準 Mute 開關，點邊個屏邊個有聲，其他全部靜音，並同步控制欄"""
         if not self.win.video_widgets:
             return
 
-        vol_val = self.win.vol_slider.value() if getattr(self.win, 'vol_slider', None) and self.win.vol_slider.value() > 0 else 100
+        # 當前選中嘅屏幕索引
+        target_idx = self.win.active_player_index
 
-        sound_target_idx = self.win.active_player_index
-        if not self.win.video_widgets[self.win.active_player_index].has_media:
-            for i, w in enumerate(self.win.video_widgets):
-                if w.has_media:
-                    sound_target_idx = i
-                    break
+        # 確保索引唔越界
+        if target_idx >= len(self.win.video_widgets):
+            target_idx = 0
 
+        # 🎯 A邏輯：點邊個屏邊個唔靜音，其他全部強制靜音
         for idx, widget in enumerate(self.win.video_widgets):
-            mpv_inst = getattr(widget, 'mpv', None) or getattr(widget, 'player', None)
-            if not mpv_inst:
-                continue
-
             try:
-                target_vol = vol_val if (idx == sound_target_idx and widget.has_media) else 0
-                current_vol = getattr(mpv_inst, 'volume', None)
-                if current_vol != target_vol:
-                    mpv_inst.volume = target_vol
+                widget.set_mute(idx != target_idx)
             except Exception:
                 pass
 
+        # 🎯 B邏輯：即時刷新底部控制欄嘅 UI 圖標 (🔊 / 🔇)
+        # 確保控制欄顯示嘅係「當前選中屏幕」嘅真實狀態
+        if hasattr(self.win, 'sync_controls_ui'):
+            self.win.sync_controls_ui()
+            
     def _show_context_menu_for_widget(self, pos, widget):
-        """🎯 分屏右鍵功能選單"""
-        menu = QMenu(self.win)
+        # ===== 1. 如果已有 Menu 打開，先徹底關閉佢 =====
+        if self.current_menu is not None:
+            try:
+                self.current_menu.close()
+                self.current_menu.deleteLater()
+            except:
+                pass
+            self.current_menu = None
+
+        # ===== 2. 奪回焦點（同之前一樣） =====
+        main_window = self.win
+        user32 = ctypes.windll.user32
+        hwnd = int(main_window.winId())
+        user32.SetForegroundWindow(hwnd)
+        user32.SetFocus(hwnd)
+        QCoreApplication.processEvents()
+
+        # ===== 3. 建立 Menu =====
+        menu = RoundedMenu(self.win)
+        self.current_menu = menu   # 記住佢，方便下次關閉
+
         widgets = self.win.video_widgets or self.win.video_frames
         idx = widgets.index(widget) if widget in widgets else 0
 
-        action_close = menu.addAction(f"❌ 關閉/切斷第 {idx + 1} 屏")
-        action_close_others = menu.addAction("🧹 關閉其他所有分屏")
+        # ===== 4. 定義一個輔助函數：先關 Menu 再執行功能 =====
+        def make_handler(func):
+            def handler():
+                # 關閉 Menu（即刻消失）
+                if self.current_menu is not None:
+                    self.current_menu.close()
+                    self.current_menu.deleteLater()
+                    self.current_menu = None
+                # 然後執行真正功能
+                func()
+            return handler
 
-        selected = menu.exec(widget.mapToGlobal(pos))
-        if selected == action_close:
-            if hasattr(self.win, '_close_single_widget'):
-                self.win._close_single_widget(widget)
-        elif selected == action_close_others:
-            if hasattr(self.win, '_close_single_widget'):
-                for w in widgets:
-                    if w != widget:
-                        self.win._close_single_widget(w)
+        # 📊 統計資訊
+        action_stats = QAction("📊 播放統計資訊", self.win)
+        def stats_func():
+            if hasattr(widget, 'toggle_stats'):
+                widget.toggle_stats()
+            elif hasattr(widget, 'mpv') and hasattr(widget.mpv, 'toggle_stats'):
+                widget.mpv.toggle_stats()
+        action_stats.triggered.connect(make_handler(stats_func))
+        menu.addAction(action_stats)
+        
+        menu.addSeparator() #  分隔線
+
+        # 🔗 複製 URL
+        action_copy = QAction("🔗 複製當前串流 URL", self.win)
+        def copy_func():
+            url = getattr(widget, '_current_url', '')
+            if not url and hasattr(widget, 'mpv'):
+                url = getattr(widget.mpv, '_current_url', '')
+            if url:
+                QApplication.clipboard().setText(str(url))
+        action_copy.triggered.connect(make_handler(copy_func))
+        menu.addAction(action_copy)
+
+        menu.addSeparator() #  分隔線
+        
+        # 📋 貼上並播放 URL (直擊核心極簡版)
+        action_paste = QAction("📋 貼上並播放剪貼簿網址", self.win)
+        def paste_func():
+            text = QApplication.clipboard().text().strip()
+            if text.startswith("http://") or text.startswith("https://"):
+                self.win.drop_mgr.process_url(text)
+        action_paste.triggered.connect(make_handler(paste_func))
+        menu.addAction(action_paste)
+        
+        menu.addSeparator() #  分隔線
+
+        # ❌ 關閉當前分屏
+        action_close_cur = QAction(f"❌ 關閉/切斷第 {idx + 1} 屏", self.win)
+        def close_cur_func():
+            self.win._close_single_widget(widget)
+        action_close_cur.triggered.connect(make_handler(close_cur_func))
+        menu.addAction(action_close_cur)
+        
+        menu.addSeparator() #  分隔線
+
+        # 🧹 關閉其他所有分屏
+        action_close_others = QAction("🧹 關閉其他所有分屏", self.win)
+        def close_others_func():
+            for w in list(widgets):
+                if w != widget:
+                    self.win._close_single_widget(w)
+        action_close_others.triggered.connect(make_handler(close_others_func))
+        menu.addAction(action_close_others)
+
+        # ===== 5. 非阻塞彈出（用 popup，唔用 exec） =====
+        global_pos = widget.mapToGlobal(pos)
+        menu.setFocus()
+        menu.popup(global_pos)   # 立即返回，唔會卡住
+
+        # ===== 6. 當 Menu 關閉時清理引用（萬一用戶㩒外面） =====
+        def on_menu_hide():
+            if self.current_menu == menu:
+                self.current_menu = None
+        menu.aboutToHide.connect(on_menu_hide)
