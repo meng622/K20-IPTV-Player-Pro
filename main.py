@@ -1,5 +1,9 @@
 import os
 import sys
+
+# 屏蔽 Qt 多國語言 OpenType 排版警告 (使用萬用字元徹底關閉 font.db 警告)
+os.environ["QT_LOGGING_RULES"] = "qt.text.font.db*=false;qt.gui.text*=false"
+
 # 📌 關鍵修復：如果是 --onefile 打包，自動將工作目錄切換至 sys._MEIPASS 臨時資料夾
 if hasattr(sys, '_MEIPASS'):
     os.chdir(sys._MEIPASS)
