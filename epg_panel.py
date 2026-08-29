@@ -1,12 +1,8 @@
 #epg_panel.py
-import re
-from datetime import datetime
-from PyQt6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QListWidget, QListWidgetItem, QSizePolicy
-from PyQt6.QtGui import QColor
-from PyQt6.QtCore import QTimer
+from config import *  # 匯入配置
+
 from skin import IconManager
 from channel_panel import _clean_epg_key
-
 
 class EPGPanelWidget(QWidget):
     def __init__(self, main_win):
@@ -44,6 +40,7 @@ class EPGPanelWidget(QWidget):
 
         self.epg_list_widget = QListWidget()
         self.epg_list_widget.setObjectName("epg_list_widget")
+        
         epg_layout.addWidget(self.epg_list_widget, 1)
 
         # 保持與主視窗相容之屬性綁定
@@ -77,7 +74,7 @@ class EPGPanelWidget(QWidget):
             self.update_epg_content(clean_name)
 
     def update_epg_content(self, channel_name=None):
-        """更新 EPG 節目表內容"""
+        """更新 EPG 節目表內容（回歸內存字典模式）"""
         if channel_name:
             self.main_win.current_channel_name = channel_name
 
@@ -90,31 +87,28 @@ class EPGPanelWidget(QWidget):
             self.epg_list_widget.addItem("⚠️ 請先選擇並播放頻道")
             return
 
-        epg_db_data = (
-            getattr(self.main_win, 'epg_data', {}) or 
-            getattr(self.main_win, 'epg_cache', {}) or 
-            (getattr(self.main_win.channel_mgr, 'epg_data', {}) if hasattr(self.main_win, 'channel_mgr') else {})
-        )
-
+        # ✅ 重點：直接讀取內存字典！
+        epg_db_data = getattr(self.main_win, 'epg_data', {}) or getattr(self.main_win, 'epg_cache', {})
         if not epg_db_data:
             self.epg_list_widget.addItem("⚠️ EPG 資料庫為空，請確定已載入 EPG 網址")
             return
 
-        ch_obj = getattr(self.main_win, 'current_channel_obj', {}) or {}
+        # 構建匹配 Key（同 channel_panel 一模一樣）
+        from epg_manager import clean_channel_name
         keys_to_check = set()
-        
         raw_name = current_ch.replace("📺", "").replace("⭐", "").replace("🕒", "").strip()
         if raw_name:
             keys_to_check.add(raw_name.lower())
-            keys_to_check.add(_clean_epg_key(raw_name))
-
+            keys_to_check.add(clean_channel_name(raw_name))
+        
+        ch_obj = getattr(self.main_win, 'current_channel_obj', {}) or {}
         if isinstance(ch_obj, dict):
             if ch_obj.get('tvg_id'):
                 keys_to_check.add(str(ch_obj.get('tvg_id')).lower().strip())
-                keys_to_check.add(_clean_epg_key(ch_obj.get('tvg_id')))
+                keys_to_check.add(clean_channel_name(ch_obj.get('tvg_id')))
             if ch_obj.get('tvg_name'):
                 keys_to_check.add(str(ch_obj.get('tvg_name')).lower().strip())
-                keys_to_check.add(_clean_epg_key(ch_obj.get('tvg_name')))
+                keys_to_check.add(clean_channel_name(ch_obj.get('tvg_name')))
 
         keys_to_check.discard("")
 
@@ -125,18 +119,10 @@ class EPGPanelWidget(QWidget):
                 break
 
         if not matched_items:
-            for ch_key, items in epg_db_data.items():
-                for k in keys_to_check:
-                    if k and (k in ch_key or ch_key in k):
-                        matched_items = items
-                        break
-                if matched_items:
-                    break
-
-        if not matched_items:
             self.epg_list_widget.addItem(f"⚠️ 頻道: {raw_name}\n未找到 EPG 節目單")
             return
 
+        # 去重並顯示
         seen_progs = set()
         unique_progs = []
         for p in matched_items:
@@ -151,7 +137,6 @@ class EPGPanelWidget(QWidget):
             stop_str = prog.get('stop', '')
             time_fmt = "--:--"
             is_current = False
-
             try:
                 s_raw = start_str.split()[0][:14]
                 e_raw = stop_str.split()[0][:14]
@@ -170,4 +155,13 @@ class EPGPanelWidget(QWidget):
             list_item = QListWidgetItem(item_text)
             if is_current:
                 list_item.setForeground(QColor("#00f2fe"))
-            self.epg_list_widget.addItem(list_item)
+                self.epg_list_widget.addItem(list_item)
+                self.epg_list_widget.setCurrentItem(list_item)
+                
+                # 🎯 終極修正：鎖定「行索引」，唔好鎖死物件！
+                target_row = self.epg_list_widget.row(list_item)
+                QTimer.singleShot(50, lambda r=target_row: self.epg_list_widget.scrollToItem(
+                    self.epg_list_widget.item(r), QAbstractItemView.ScrollHint.PositionAtCenter
+                ))
+            else:
+                self.epg_list_widget.addItem(list_item)
