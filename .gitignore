@@ -1,9 +1,14 @@
 # 排除快取與編譯檔
 __pycache__/
 *.pyc
+
+#首次打開，該目錄會產生以下文件
 epg_cache/
 logo_cache/
 snapshots/
+k20_settings.json
 
 # 排除超過 100MB 的大檔 (改為在 Release 頁面單獨提供)
 libmpv-2.dll
+ffmpeg.exe
+yt-dlp.exe
