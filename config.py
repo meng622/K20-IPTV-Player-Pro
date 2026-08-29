@@ -1,15 +1,21 @@
+# config.py
+
 import os  # 系統路徑
 import re  # 正則匹配
 import sys  # 系統參數
 import time  # 時間控制
 import json  # JSON解析
+import gzip
+import zlib
+import html
 import ctypes  # C語言接口
-import urllib.request  # 網絡請求
-import sqlite3
 import hashlib
+import sqlite3
+import urllib.request  # 網絡請求
 import xml.etree.ElementTree as ET
 
-from ctypes import c_char_p, c_void_p, c_int, c_double, byref  # C數據類型
+from datetime import datetime
+from ctypes import c_char_p, c_void_p, c_int, c_double, byref, wintypes, pointer, sizeof, Structure  # C數據類型
 
 #========================================================================================================
 
@@ -24,6 +30,10 @@ from PyQt6.QtCore import (
     QPointF,  # 浮點坐標
     QThread,  # 多線程
     pyqtSignal,  # 自訂信號
+    QEasingCurve,
+    QCoreApplication,
+    QPropertyAnimation,
+    QAbstractNativeEventFilter, 
 )
 #========================================================================================================
 from PyQt6.QtGui import (
@@ -39,9 +49,12 @@ from PyQt6.QtGui import (
     QPainter,  # 繪圖工具
     QKeyEvent,  # 鍵盤事件
     QShortcut,  # 快捷鍵
+    QDropEvent,
     QKeySequence,  # 按鍵組合
     QPainterPath,  # 繪圖路徑
+    QGuiApplication,
     QLinearGradient,  # 漸變顏色
+    
 )
 #========================================================================================================
 from PyQt6.QtWidgets import (
@@ -49,6 +62,7 @@ from PyQt6.QtWidgets import (
     QFrame,  # 邊框外殼
     QDialog,  # 對話框
     QCheckBox,  # 勾選框
+    QSizeGrip,
     QFileDialog,  # 檔案選擇
     QMessageBox,  # 彈窗提示
     QMainWindow,  # 主視窗
@@ -75,6 +89,8 @@ from PyQt6.QtWidgets import (
 
     QScrollBar,  # 滾動條
     QProgressBar,  # 進度條
+    
+    QKeySequenceEdit,
 )
 #========================================================================================================
 
