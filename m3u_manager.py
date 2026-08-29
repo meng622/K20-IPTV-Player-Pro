@@ -1,6 +1,23 @@
 # m3u_manager.py
 from config import *
 
+from urllib.parse import urlparse, parse_qs
+
+def parse_xtream_url(url):
+    """解析 Xtream URL，回傳 {'server', 'username', 'password'} 或 None"""
+    import re
+    # 提取基礎伺服器 (scheme://host:port)
+    server_match = re.match(r'(https?://[^/]+)', url)
+    if not server_match:
+        return None
+    server = server_match.group(1)
+    # 提取用戶名同密碼
+    user_match = re.search(r'[?&]username=([^&]+)', url)
+    pwd_match = re.search(r'[?&]password=([^&]+)', url)
+    if user_match and pwd_match:
+        return {'server': server, 'username': user_match.group(1), 'password': pwd_match.group(1)}
+    return None
+
 # ==================== M3U 異步解析引擎 ====================
 class M3UFetchWorker(QThread):
     finished_signal = pyqtSignal(list, str)  # 📌 修改：額外傳出自動提取到的 EPG 網址 (channels, epg_url)
@@ -51,7 +68,7 @@ class M3UFetchWorker(QThread):
                     extracted_epg_url = extract_attr(line, 'x-tvg-url') or extract_attr(line, 'url-tvg')
                     if extracted_epg_url:
                         # 1. 自動把 m3u4u 的 /epg/ 轉成純 XML 的 /xml/
-                        extracted_epg_url = re.sub(r'm3u4u\.com/epg/', '[m3u4u.com/xml/](https://m3u4u.com/xml/)', extracted_epg_url)
+                        extracted_epg_url = re.sub(r'm3u4u\.com/epg/', 'm3u4u.com/xml/', extracted_epg_url)
                         # 2. 自動去除去掉結尾的 .gz (如果有)
                         if extracted_epg_url.endswith('.gz'):
                             extracted_epg_url = extracted_epg_url[:-3]
@@ -92,208 +109,23 @@ class M3UFetchWorker(QThread):
         self.finished_signal.emit(channels, extracted_epg_url)
 
 # ==================== M3U 管理 UI 組件 ====================
-class M3U播放清單管理界面(QFrame):
-    def __init__(self, name, url, is_local=False, is_active=False, parent=None, accent="#a855f7", border="#581c87", bg_panel="#121520"):
-        super().__init__(parent)
-        self.is_local = is_local
-        self.accent = accent
-        self.border_color = border
-        self.bg_panel = bg_panel
-        
-        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
-        self.setObjectName("m3u_item_frame")
-        self.setFixedHeight(64)
-        # 🎯 設置最小寬度，當父容器太窄時觸發橫向 Scrollbar
-        self.setMinimumWidth(450)
-        
-        layout = QHBoxLayout(self)
-        layout.setContentsMargins(14, 6, 14, 6)
-        layout.setSpacing(10)
-
-        info_layout = QVBoxLayout()
-        info_layout.setSpacing(2)
-        info_layout.setAlignment(Qt.AlignmentFlag.AlignVCenter)
-
-        self.title_lbl = QLabel(name)
-        self.title_lbl.setObjectName("m3u_item_title")
-
-        # 🎯 網址 Label 設置：自動截斷 + ToolTip 懸停查看完整 URL
-        self.url_lbl = QLabel(url)
-        self.url_lbl.setObjectName("m3u_item_url")
-        self.url_lbl.setToolTip(url)
-
-        info_layout.addWidget(self.title_lbl)
-        info_layout.addWidget(self.url_lbl)
-        layout.addLayout(info_layout, stretch=1)
-
-        badge_layout = QHBoxLayout()
-        badge_layout.setSpacing(6)
-        badge_layout.setAlignment(Qt.AlignmentFlag.AlignVCenter)
-
-        badge_type = "本地" if is_local else "URL"
-        self.badge_lbl = QLabel(badge_type)
-        self.badge_lbl.setObjectName("m3u_item_badge")
-        
-        badge_layout.addWidget(self.badge_lbl)
-
-        self.star_lbl = QLabel("⭐")
-        self.star_lbl.setObjectName("m3u_item_star")
-        badge_layout.addWidget(self.star_lbl)
-
-        layout.addLayout(badge_layout)
-        self.set_active(is_active)
-
-    def set_active(self, is_active):
-        self.is_active = is_active
-        self.star_lbl.setVisible(is_active)
-        
-        # 📌 配合 skin.py 的屬性選擇器驅動，利用動態屬性控制外觀狀態
-        self.setProperty("active", "true" if is_active else "false")
-        self.style().unpolish(self)
-        self.style().polish(self)
-        self.update()
-        
-        # 已移除原本寫死的 self.setStyleSheet(...)，全面交由 skin.py 統一管理
-
-class M3U播放列表管理彈窗(QDialog):
-    def __init__(self, title, parent=None):
-        super().__init__(parent)
-        self.setWindowTitle(title)
-        self.setFixedWidth(400)
-
-class 添加網址對話框(M3U播放列表管理彈窗):
-    def __init__(self, parent=None):
-        super().__init__("添加網絡鏈接", parent)
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(20, 20, 20, 20)
-        layout.setSpacing(12)
-
-        layout.addWidget(QLabel("訂閱名稱"))
-        self.name_input = QLineEdit()
-        self.name_input.setPlaceholderText("請輸入訂閱名稱 (如：IPTV / Live)")
-        layout.addWidget(self.name_input)
-
-        layout.addWidget(QLabel("M3U 網址"))
-        self.url_input = QLineEdit()
-        self.url_input.setPlaceholderText("http://或 https://...")
-        layout.addWidget(self.url_input)
-
-        # 🎯 新增：EPG 網址輸入框
-        layout.addWidget(QLabel("EPG 地址 (使用逗號合併多個 EPG):"))
-        self.epg_input = QLineEdit()
-        self.epg_input.setPlaceholderText("http://example.com/epg.xml")
-        layout.addWidget(self.epg_input)
-        
-        # 🎯 新增：台徽推送/範本網址輸入框 (支援 {name} 與逗號分隔)
-        layout.addWidget(QLabel("台徽推送範本 (使用逗號分隔多個，支援 {name} 自動匹配):"))
-        self.logo_input = QLineEdit()
-        self.logo_input.setPlaceholderText("https://live.fanmingming.cn/tv/{name}.png")
-        self.logo_input.setText("https://live.fanmingming.cn/tv/{name}.png")
-        layout.addWidget(self.logo_input)
-
-        btn_layout = QHBoxLayout()
-        btn_layout.addStretch()
-        ok_btn = QPushButton("確定"); ok_btn.setProperty("class", "confirm-btn")
-        cancel_btn = QPushButton("取消"); cancel_btn.setProperty("class", "cancel-btn")
-        ok_btn.clicked.connect(self.accept); cancel_btn.clicked.connect(self.reject)
-        btn_layout.addWidget(ok_btn); btn_layout.addWidget(cancel_btn)
-        layout.addLayout(btn_layout)
-
-class 添加Xtream對話框(M3U播放列表管理彈窗):
-    def __init__(self, parent=None):
-        super().__init__("添加 Xtream 代碼", parent)
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(20, 20, 20, 20)
-        layout.setSpacing(10)
-
-        layout.addWidget(QLabel("訂閱名稱"))
-        self.name_input = QLineEdit()
-        layout.addWidget(self.name_input)
-
-        layout.addWidget(QLabel("服務器 URL"))
-        self.server_input = QLineEdit()
-        self.server_input.setPlaceholderText("http://example.com:8080")
-        layout.addWidget(self.server_input)
-
-        layout.addWidget(QLabel("用戶名"))
-        self.user_input = QLineEdit()
-        layout.addWidget(self.user_input)
-
-        layout.addWidget(QLabel("密碼"))
-        self.pass_input = QLineEdit()
-        self.pass_input.setEchoMode(QLineEdit.EchoMode.Password)
-        layout.addWidget(self.pass_input)
-
-        btn_layout = QHBoxLayout()
-        btn_layout.addStretch()
-        ok_btn = QPushButton("確定"); ok_btn.setProperty("class", "confirm-btn")
-        cancel_btn = QPushButton("取消"); cancel_btn.setProperty("class", "cancel-btn")
-        ok_btn.clicked.connect(self.accept); cancel_btn.clicked.connect(self.reject)
-        btn_layout.addWidget(ok_btn); btn_layout.addWidget(cancel_btn)
-        layout.addLayout(btn_layout)
-        
-    def get_data(self):
-        name = self.name_input.text().strip() or "Xtream IPTV"
-        srv = self.server_input.text().strip().rstrip('/')
-        usr = self.user_input.text().strip()
-        pwd = self.pass_input.text().strip()
-        generated_url = f"{srv}/get.php?username={usr}&password={pwd}&type=m3u_plus&output=ts"
-        return {'name': name, 'url': generated_url}
-
-class 編輯來源對話框(M3U播放列表管理彈窗):
-    def __init__(self, name="", url="", epg_url="", logo_url="", parent=None):
-        super().__init__("編輯訂閱網址", parent)
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(20, 20, 20, 20)
-        layout.setSpacing(12)
-
-        layout.addWidget(QLabel("訂閱名稱"))
-        self.name_input = QLineEdit(name)
-        self.name_input.setPlaceholderText("例如：自訂頻道 / IPTV")
-        layout.addWidget(self.name_input)
-
-        layout.addWidget(QLabel("訂閱網址 / 本地M3U文件路徑"))
-        self.url_input = QLineEdit(url)
-        self.url_input.setPlaceholderText("https://... 或本地 .m3u 路徑")
-        layout.addWidget(self.url_input)
-
-        # 🎯 新增：EPG 網址編輯輸入框
-        layout.addWidget(QLabel("EPG 地址 (使用逗號合併多個 EPG):"))
-        self.epg_input = QLineEdit(epg_url)
-        self.epg_input.setPlaceholderText("http://example.com/epg.xml")
-        layout.addWidget(self.epg_input)
-        
-        # 🎯 新增：台徽推送/範本網址輸入框 (支援 {name} 與逗號分隔)
-        layout.addWidget(QLabel("台徽推送範本 (使用逗號分隔多個，支援 {name} 自動匹配):"))
-        self.logo_input = QLineEdit()
-        self.logo_input.setPlaceholderText("https://live.fanmingming.cn/tv/{name}.png")
-        self.logo_input.setText(logo_url or "https://live.fanmingming.cn/tv/{name}.png")
-        layout.addWidget(self.logo_input)
-
-        btn_layout = QHBoxLayout()
-        btn_layout.addStretch()
-        ok_btn = QPushButton("確定"); ok_btn.setProperty("class", "confirm-btn")
-        cancel_btn = QPushButton("取消"); cancel_btn.setProperty("class", "cancel-btn")
-        ok_btn.clicked.connect(self.accept); cancel_btn.clicked.connect(self.reject)
-        btn_layout.addWidget(ok_btn); btn_layout.addWidget(cancel_btn)
-        layout.addLayout(btn_layout)
-
-    def get_data(self):
-        return (
-            self.name_input.text().strip(),
-            self.url_input.text().strip(),
-            self.epg_input.text().strip(),
-            self.logo_input.text().strip()
-        )
-
-class M3U管理器主視窗(QDialog):
+class M3U管理主視窗(QDialog):
     def __init__(self, parent=None, sources=None, current_url=None):
         super().__init__(parent)
-        self.setWindowTitle("M3U管理器主視窗")
+        self.setWindowTitle("M3U管理主視窗")
         self.resize(720, 500)
         self.parent_win = parent
         self.sources = [dict(s) for s in sources] if sources else []
-        self.selected_url = current_url
+        # 根據 current_url 搵對應索引
+        self.selected_index = -1
+        if current_url:
+            for i, src in enumerate(self.sources):
+                if src.get('url') == current_url:
+                    self.selected_index = i
+                    break
+
+        # 🔒 更新標誌，防止信號互相干擾
+        self._updating = False
 
         main_layout = QVBoxLayout(self)
         main_layout.setContentsMargins(20, 20, 20, 20)
@@ -304,7 +136,7 @@ class M3U管理器主視窗(QDialog):
         header_icon.setStyleSheet("font-size: 22px;")
         
         header_text_layout = QVBoxLayout()
-        title_lbl = QLabel("M3U管理器主視窗")
+        title_lbl = QLabel("M3U管理主視窗")
         title_lbl.setStyleSheet("font-size: 15px; font-weight: bold; color: #fff;")
         sub_lbl = QLabel("管理你的 IPTV 頻道列表與播放源。")
         sub_lbl.setStyleSheet("font-size: 11px; color: #888899;")
@@ -398,7 +230,7 @@ class M3U管理器主視窗(QDialog):
         bg_main = "#0b0c10"
         bg_panel = "#121520"
 
-        if self.parent_win and hasattr(self.parent_win, 'current_theme_config'):
+        if self.parent_win:
             c = self.parent_win.current_theme_config
             accent = c.get('accent', accent)
             border = c.get('border', border)
@@ -410,124 +242,399 @@ class M3U管理器主視窗(QDialog):
         self.theme_bg_panel = bg_panel
 
         # 📌 同步主視窗樣式，全面交由 skin.py 統一控管
-        if self.parent_win and hasattr(self.parent_win, 'styleSheet'):
+        if self.parent_win:
             self.setStyleSheet(self.parent_win.styleSheet())
 
         if hasattr(self, 'action_title'):
             self.action_title.setStyleSheet(f"color: {accent}; font-weight: bold; font-size: 12px; margin-bottom: 4px;")
 
     def get_data(self):
-        return self.sources, self.selected_url
+        # 修正：回傳當前選中的 URL（如果有的話）
+        selected_url = self.sources[self.selected_index]['url'] if 0 <= self.selected_index < len(self.sources) else None
+        return self.sources, selected_url
 
     def refresh_list(self):
+        self._updating = True   # 🔒 阻止 on_selection_changed 介入
+
+        # 清空列表
         while self.list_widget.count() > 0:
             item = self.list_widget.takeItem(0)
             widget = self.list_widget.itemWidget(item)
             if widget:
                 widget.deleteLater()
             del item
-
         self.list_widget.clear()
-        filter_text = self.search_input.text().strip().lower()
 
+        filter_text = self.search_input.text().strip().lower()
         accent = getattr(self, 'theme_accent', '#a855f7')
         border = getattr(self, 'theme_border', '#581c87')
         bg_panel = getattr(self, 'theme_bg_panel', '#121520')
 
-        for src in self.sources:
+        # 重建列表
+        for idx, src in enumerate(self.sources):
             name = src.get('name', '未命名')
             url = src.get('url', '')
             is_local = url.lower().endswith(('m3u', 'm3u8', 'txt')) and not url.lower().startswith(('http://', 'https://'))
-            is_active = (url == self.selected_url)
+            is_active = (idx == self.selected_index)   # 暫時標記
 
             if filter_text and (filter_text not in name.lower() and filter_text not in url.lower()):
                 continue
 
-            card = M3U播放清單管理界面(
-                name, url, 
-                is_local=is_local, 
-                is_active=is_active, 
-                accent=accent, 
-                border=border, 
+            card = M3U管理框架(
+                name, url,
+                is_local=is_local,
+                is_active=is_active,
+                accent=accent,
+                border=border,
                 bg_panel=bg_panel
             )
             item = QListWidgetItem()
-            
-            # 🎯 核心重點：計算內容所需的最小寬度，強制傳給 QListWidgetItem
-            # 500px 確保超長 URL 必定會觸發橫向滾動條！
             item.setSizeHint(QSize(460, 72))
             item.setData(Qt.ItemDataRole.UserRole, src)
-
             self.list_widget.addItem(item)
             self.list_widget.setItemWidget(item, card)
 
-            if is_active:
-                self.list_widget.setCurrentItem(item)
+        # ----- 設定當前選中項（直接處理，考慮過濾） -----
+        if self.selected_index >= 0 and self.selected_index < len(self.sources):
+            target_src = self.sources[self.selected_index]
+            found = False
+            for i in range(self.list_widget.count()):
+                item = self.list_widget.item(i)
+                src = item.data(Qt.ItemDataRole.UserRole)
+                if src and src.get('url') == target_src.get('url'):
+                    self.list_widget.setCurrentItem(item)
+                    self.list_widget.scrollToItem(item, QAbstractItemView.ScrollHint.EnsureVisible)
+                    found = True
+                    break
+            if not found:
+                if self.list_widget.count() > 0:
+                    self.list_widget.setCurrentRow(0)
+                else:
+                    self.list_widget.clearSelection()
+        else:
+            self.list_widget.clearSelection()
+
+        # 🆕 統一更新所有卡片的 active 狀態（確保視覺與選中一致）
+        current_item = self.list_widget.currentItem()
+        for i in range(self.list_widget.count()):
+            item = self.list_widget.item(i)
+            card = self.list_widget.itemWidget(item)
+            if card:
+                card.set_active(item == current_item)
+
+        self._updating = False   # 🔓 解鎖
 
     def on_selection_changed(self):
+        if self._updating:   # 如果正在 refresh，就乜都唔做
+            return
         selected_item = self.list_widget.currentItem()
+        if not selected_item:
+            return
+        src = selected_item.data(Qt.ItemDataRole.UserRole)
+        if not src:
+            return
+        # 在 sources 中尋找匹配的索引（用 url + name 確保唯一）
+        for i, s in enumerate(self.sources):
+            if s.get('url') == src.get('url') and s.get('name') == src.get('name'):
+                self.selected_index = i
+                break
+        # 更新所有卡片的 active 狀態
         for i in range(self.list_widget.count()):
             item = self.list_widget.item(i)
             card = self.list_widget.itemWidget(item)
             if card:
                 card.set_active(item == selected_item)
-        if selected_item:
-            src = selected_item.data(Qt.ItemDataRole.UserRole)
-            self.selected_url = src.get('url')
 
     def add_file(self):
         file_path, _ = QFileDialog.getOpenFileName(self, "選擇 M3U 播放列表檔", "", "M3U Files (*.m3u *.m3u8 *.txt);;All Files (*)")
         if file_path:
-            dlg = 編輯來源對話框(name="本地播放列表", url=file_path, parent=self)
+            dlg = 編輯彈窗(name="本地播放列表", url=file_path, parent=self)
             if dlg.exec() == QDialog.DialogCode.Accepted:
                 name = dlg.name_input.text().strip() or "本地播放列表"
                 url = dlg.url_input.text().strip()
                 if url:
                     self.sources.append({'name': name, 'url': url})
+                    self.selected_index = len(self.sources) - 1
                     self.refresh_list()
 
     def add_url(self):
-        dlg = 添加網址對話框(self)
+        dlg = M3U添加網址彈窗(self)
         if dlg.exec() == QDialog.DialogCode.Accepted:
             name = dlg.name_input.text().strip() or "網絡訂閱"
             url = dlg.url_input.text().strip()
-            epg = dlg.epg_input.text().strip()  # 📌 修復：保存 EPG 輸入框的內容
-            logo = dlg.logo_input.text().strip() # 🎯 補上保存台徽範本網址
+            epg = dlg.epg_input.text().strip()
+            logo = dlg.logo_input.text().strip()
             if url:
                 self.sources.append({'name': name, 'url': url, 'epg': epg, 'logo': logo})
+                self.selected_index = len(self.sources) - 1
                 self.refresh_list()
-
+                
     def add_xtream(self):
-        dlg = 添加Xtream對話框(self)
+        dlg = M3U添加Xtream彈窗(self)
         if dlg.exec() == QDialog.DialogCode.Accepted:
             data = dlg.get_data()
             if data:
                 self.sources.append(data)
+                self.selected_index = len(self.sources) - 1
                 self.refresh_list()
 
     def edit_source(self):
-        row = self.list_widget.currentRow()
-        if row < 0 or row >= len(self.sources):
+        selected_item = self.list_widget.currentItem()
+        if not selected_item:
             return
-            
-        src = self.sources[row]
-        # 🎯 傳入原有的 epg 與 logo 網址
-        dlg = 編輯來源對話框(name=src.get('name', ''), url=src.get('url', ''), epg_url=src.get('epg', ''), logo_url=src.get('logo', ''), parent=self)
-        
-        if dlg.exec() == QDialog.DialogCode.Accepted:
-            # 🎯 完整解包 4 個返回值 (名稱, URL, EPG, Logo)，徹底解決崩潰
-            new_name, new_url, new_epg, new_logo = dlg.get_data()
-            self.sources[row]['name'] = new_name or "未命名訂閱"
-            self.sources[row]['url'] = new_url
-            self.sources[row]['epg'] = new_epg
-            self.sources[row]['logo'] = new_logo
-            
-            if self.selected_url == src.get('url'):
-                self.selected_url = new_url
-            self.refresh_list()
+        src = selected_item.data(Qt.ItemDataRole.UserRole)
+        if not src:
+            return
+        # 找出在 sources 中的索引
+        row = -1
+        for i, s in enumerate(self.sources):
+            if s.get('url') == src.get('url') and s.get('name') == src.get('name'):
+                row = i
+                break
+        if row == -1:
+            return
+
+        xtream_info = parse_xtream_url(src.get('url', ''))
+
+        if xtream_info:
+            # ... 編輯 Xtream ...
+            dlg = M3U添加Xtream彈窗(self)
+            dlg.name_input.setText(src.get('name', ''))
+            dlg.server_input.setText(xtream_info['server'])
+            dlg.user_input.setText(xtream_info['username'])
+            dlg.pass_input.setText(xtream_info['password'])
+            if dlg.exec() == QDialog.DialogCode.Accepted:
+                new_data = dlg.get_data()
+                self.sources[row].update(new_data)
+                self.selected_index = row   # 保持同一行
+                self.refresh_list()
+        else:
+            # 普通編輯
+            dlg = 編輯彈窗(
+                name=src.get('name', ''),
+                url=src.get('url', ''),
+                epg_url=src.get('epg', ''),
+                logo_url=src.get('logo', ''),
+                parent=self
+            )
+            if dlg.exec() == QDialog.DialogCode.Accepted:
+                new_name, new_url, new_epg, new_logo = dlg.get_data()
+                self.sources[row]['name'] = new_name or "未命名訂閱"
+                self.sources[row]['url'] = new_url
+                self.sources[row]['epg'] = new_epg
+                self.sources[row]['logo'] = new_logo
+                self.selected_index = row
+                self.refresh_list()
 
     def delete_source(self):
-        row = self.list_widget.currentRow()
-        if 0 <= row < len(self.sources):
-            self.sources.pop(row)
-            self.refresh_list()
+        selected_item = self.list_widget.currentItem()
+        if not selected_item:
+            return
+        src = selected_item.data(Qt.ItemDataRole.UserRole)
+        if not src:
+            return
+        row = -1
+        for i, s in enumerate(self.sources):
+            if s.get('url') == src.get('url') and s.get('name') == src.get('name'):
+                row = i
+                break
+        if row == -1:
+            return
+        self.sources.pop(row)
+        # 調整 selected_index
+        if self.selected_index == row:
+            self.selected_index = min(row, len(self.sources) - 1) if self.sources else -1
+        elif self.selected_index > row:
+            self.selected_index -= 1
+        self.refresh_list()
+
+class M3U管理框架(QFrame):
+    def __init__(self, name, url, is_local=False, is_active=False, parent=None, accent="#a855f7", border="#581c87", bg_panel="#121520"):
+        super().__init__(parent)
+        self.is_local = is_local
+        self.accent = accent
+        self.border_color = border
+        self.bg_panel = bg_panel
+        
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        self.setObjectName("m3u_item_frame")
+        self.setFixedHeight(64)
+        # 🎯 設置最小寬度，當父容器太窄時觸發橫向 Scrollbar
+        self.setMinimumWidth(450)
+        
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(14, 6, 14, 6)
+        layout.setSpacing(10)
+
+        info_layout = QVBoxLayout()
+        info_layout.setSpacing(2)
+        info_layout.setAlignment(Qt.AlignmentFlag.AlignVCenter)
+
+        self.title_lbl = QLabel(name)
+        self.title_lbl.setObjectName("m3u_item_title")
+
+        # 🎯 網址 Label 設置：自動截斷 + ToolTip 懸停查看完整 URL
+        self.url_lbl = QLabel(url)
+        self.url_lbl.setObjectName("m3u_item_url")
+        self.url_lbl.setToolTip(url)
+
+        info_layout.addWidget(self.title_lbl)
+        info_layout.addWidget(self.url_lbl)
+        layout.addLayout(info_layout, stretch=1)
+
+        badge_layout = QHBoxLayout()
+        badge_layout.setSpacing(6)
+        badge_layout.setAlignment(Qt.AlignmentFlag.AlignVCenter)
+
+        badge_type = "本地" if is_local else "URL"
+        self.badge_lbl = QLabel(badge_type)
+        self.badge_lbl.setObjectName("m3u_item_badge")
+        
+        badge_layout.addWidget(self.badge_lbl)
+
+        self.star_lbl = QLabel("⭐")
+        self.star_lbl.setObjectName("m3u_item_star")
+        badge_layout.addWidget(self.star_lbl)
+
+        layout.addLayout(badge_layout)
+        self.set_active(is_active)
+
+    def set_active(self, is_active):
+        self.is_active = is_active
+        self.star_lbl.setVisible(is_active)
+        
+        # 📌 配合 skin.py 的屬性選擇器驅動，利用動態屬性控制外觀狀態
+        self.setProperty("active", "true" if is_active else "false")
+        self.style().unpolish(self)
+        self.style().polish(self)
+        self.update()
+
+class M3U操作彈窗(QDialog):
+    def __init__(self, title, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle(title)
+        self.setFixedWidth(400)
+
+class M3U添加網址彈窗(M3U操作彈窗):
+    def __init__(self, parent=None):
+        super().__init__("添加網絡鏈接", parent)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(12)
+
+        layout.addWidget(QLabel("訂閱名稱"))
+        self.name_input = QLineEdit()
+        self.name_input.setPlaceholderText("請輸入訂閱名稱 (如：IPTV / Live)")
+        layout.addWidget(self.name_input)
+
+        layout.addWidget(QLabel("M3U 網址"))
+        self.url_input = QLineEdit()
+        self.url_input.setPlaceholderText("https://abc.de.fg/live.m3u")
+        layout.addWidget(self.url_input)
+
+        # 🎯 新增：EPG 網址輸入框
+        layout.addWidget(QLabel("EPG 地址 (使用逗號合併多個 EPG):"))
+        self.epg_input = QLineEdit()
+        self.epg_input.setPlaceholderText("默認例子：https://live.fanmingming.cn/e.xml")
+        layout.addWidget(self.epg_input)
+        
+        # 🎯 新增：台徽推送/範本網址輸入框 (支援 {name} 與逗號分隔)
+        layout.addWidget(QLabel("台徽推送範本 (使用逗號分隔多個，支援 {name} 自動匹配):"))
+        self.logo_input = QLineEdit()
+        self.logo_input.setPlaceholderText("默認例子：https://live.fanmingming.cn/tv/{name}.png") #提示
+        layout.addWidget(self.logo_input)
+
+        btn_layout = QHBoxLayout()
+        btn_layout.addStretch()
+        ok_btn = QPushButton("確定"); ok_btn.setProperty("class", "confirm-btn")
+        cancel_btn = QPushButton("取消"); cancel_btn.setProperty("class", "cancel-btn")
+        ok_btn.clicked.connect(self.accept); cancel_btn.clicked.connect(self.reject)
+        btn_layout.addWidget(ok_btn); btn_layout.addWidget(cancel_btn)
+        layout.addLayout(btn_layout)
+
+class M3U添加Xtream彈窗(M3U操作彈窗):
+    def __init__(self, parent=None):
+        super().__init__("添加 Xtream 代碼", parent)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(10)
+
+        layout.addWidget(QLabel("訂閱名稱"))
+        self.name_input = QLineEdit()
+        layout.addWidget(self.name_input)
+
+        layout.addWidget(QLabel("服務器 URL"))
+        self.server_input = QLineEdit()
+        self.server_input.setPlaceholderText("http://example.com:8080")
+        layout.addWidget(self.server_input)
+
+        layout.addWidget(QLabel("用戶名"))
+        self.user_input = QLineEdit()
+        layout.addWidget(self.user_input)
+
+        layout.addWidget(QLabel("密碼"))
+        self.pass_input = QLineEdit()
+        self.pass_input.setEchoMode(QLineEdit.EchoMode.Password)
+        layout.addWidget(self.pass_input)
+
+        btn_layout = QHBoxLayout()
+        btn_layout.addStretch()
+        ok_btn = QPushButton("確定"); ok_btn.setProperty("class", "confirm-btn")
+        cancel_btn = QPushButton("取消"); cancel_btn.setProperty("class", "cancel-btn")
+        ok_btn.clicked.connect(self.accept); cancel_btn.clicked.connect(self.reject)
+        btn_layout.addWidget(ok_btn); btn_layout.addWidget(cancel_btn)
+        layout.addLayout(btn_layout)
+        
+    def get_data(self):
+        name = self.name_input.text().strip() or "Xtream IPTV"
+        srv = self.server_input.text().strip().rstrip('/')
+        usr = self.user_input.text().strip()
+        pwd = self.pass_input.text().strip()
+        generated_url = f"{srv}/get.php?username={usr}&password={pwd}&type=m3u_plus&output=ts"
+        return {'name': name, 'url': generated_url}
+
+class 編輯彈窗(M3U操作彈窗):
+    def __init__(self, name="", url="", epg_url="", logo_url="", parent=None):
+        super().__init__("編輯訂閱網址", parent)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(12)
+
+        layout.addWidget(QLabel("訂閱名稱"))
+        self.name_input = QLineEdit(name)
+        self.name_input.setPlaceholderText("例如：IPTV")
+        layout.addWidget(self.name_input)
+
+        layout.addWidget(QLabel("訂閱網址 / 本地M3U文件路徑"))
+        self.url_input = QLineEdit(url)
+        self.url_input.setPlaceholderText("https://... 或本地 .m3u 路徑")
+        layout.addWidget(self.url_input)
+
+        # 🎯 新增：EPG 網址編輯輸入框
+        layout.addWidget(QLabel("EPG 地址 (使用逗號合併多個 EPG):"))
+        self.epg_input = QLineEdit(epg_url)
+        self.epg_input.setPlaceholderText("默認例子：https://live.fanmingming.cn/e.xml")
+        layout.addWidget(self.epg_input)
+        
+        # 🎯 新增：台徽推送/範本網址輸入框 (支援 {name} 與逗號分隔)
+        layout.addWidget(QLabel("台徽推送範本 (使用逗號分隔多個，支援 {name} 自動匹配):"))
+        self.logo_input = QLineEdit()
+        self.logo_input.setPlaceholderText("默認例子：https://live.fanmingming.cn/tv/{name}.png") #提示
+        self.logo_input.setText(logo_url) 
+        layout.addWidget(self.logo_input)
+
+        btn_layout = QHBoxLayout()
+        btn_layout.addStretch()
+        ok_btn = QPushButton("確定"); ok_btn.setProperty("class", "confirm-btn")
+        cancel_btn = QPushButton("取消"); cancel_btn.setProperty("class", "cancel-btn")
+        ok_btn.clicked.connect(self.accept); cancel_btn.clicked.connect(self.reject)
+        btn_layout.addWidget(ok_btn); btn_layout.addWidget(cancel_btn)
+        layout.addLayout(btn_layout)
+
+    def get_data(self):
+        return (
+            self.name_input.text().strip(),
+            self.url_input.text().strip(),
+            self.epg_input.text().strip(),
+            self.logo_input.text().strip()
+        )
