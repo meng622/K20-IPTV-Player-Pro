@@ -1,10 +1,6 @@
-import os
-import sys
-import ctypes
-from ctypes import c_int, pointer, sizeof, Structure, c_void_p
+# skin.py
+
 from config import *
-from PyQt6.QtGui import QIcon, QPixmap, QPainter, QColor
-from PyQt6.QtCore import QSize, Qt
 from PyQt6.QtSvg import QSvgRenderer
 
 # ==================================================
@@ -215,6 +211,7 @@ class SkinManager:
                 /* 🎯 3. 大弧度 iOS 圓角 */
                 border-radius: 14px !important; 
                 margin-bottom: 8px; 
+                margin-right: 10px;
                 padding: 8px 12px; 
                 color: #ffffff !important; 
             }}
@@ -369,29 +366,61 @@ class SkinManager:
             /* ==================================================
                📌 區塊 7：全域極簡滾動條美化 (ScrollBars)
                ================================================== */
-            QAbstractScrollArea QScrollBar:vertical, QListWidget QScrollBar:vertical {{ 
+            /* 🎯 垂直滾動條 */
+            QAbstractScrollArea QScrollBar:vertical, QListWidget QScrollBar:vertical, QDialog QScrollBar:vertical {{ 
                 border: none !important; 
                 background: rgba(0, 0, 0, 0.2) !important; 
                 width: 6px !important; 
                 margin: 0px !important; 
             }}
-            QAbstractScrollArea QScrollBar::handle:vertical, QListWidget QScrollBar::handle:vertical {{ 
+            QAbstractScrollArea QScrollBar::handle:vertical, QListWidget QScrollBar::handle:vertical, QDialog QScrollBar::handle:vertical {{ 
                 background: {c['border']} !important; 
                 min-height: 20px !important; 
                 border-radius: 3px !important; 
             }}
-            QAbstractScrollArea QScrollBar::handle:vertical:hover, QListWidget QScrollBar::handle:vertical:hover {{ 
+            QAbstractScrollArea QScrollBar::handle:vertical:hover, QListWidget QScrollBar::handle:vertical:hover, QDialog QScrollBar::handle:vertical:hover {{ 
                 background: {c['accent']} !important; 
             }}
             QAbstractScrollArea QScrollBar::add-line:vertical, QAbstractScrollArea QScrollBar::sub-line:vertical,
-            QListWidget QScrollBar::add-line:vertical, QListWidget QScrollBar::sub-line:vertical {{ 
+            QListWidget QScrollBar::add-line:vertical, QListWidget QScrollBar::sub-line:vertical,
+            QDialog QScrollBar::add-line:vertical, QDialog QScrollBar::sub-line:vertical {{ 
                 height: 0px !important; 
                 background: none !important; 
             }}
             QAbstractScrollArea QScrollBar::add-page:vertical, QAbstractScrollArea QScrollBar::sub-page:vertical,
-            QListWidget QScrollBar::add-page:vertical, QListWidget QScrollBar::sub-page:vertical {{ 
+            QListWidget QScrollBar::add-page:vertical, QListWidget QScrollBar::sub-page:vertical,
+            QDialog QScrollBar::add-page:vertical, QDialog QScrollBar::sub-page:vertical {{ 
                 background: none !important; 
             }}
+
+            /* 🎯 水平滾動條（統一主題藍色） */
+            QAbstractScrollArea QScrollBar:horizontal, QListWidget QScrollBar:horizontal, QDialog QScrollBar:horizontal {{ 
+                border: none !important; 
+                background: rgba(0, 0, 0, 0.2) !important; 
+                height: 6px !important; 
+                margin: 0px !important; 
+            }}
+            QAbstractScrollArea QScrollBar::handle:horizontal, QListWidget QScrollBar::handle:horizontal, QDialog QScrollBar::handle:horizontal {{ 
+                background: {c['accent']} !important; 
+                min-width: 20px !important; 
+                border-radius: 3px !important; 
+            }}
+            QAbstractScrollArea QScrollBar::handle:horizontal:hover, QListWidget QScrollBar::handle:horizontal:hover, QDialog QScrollBar::handle:horizontal:hover {{ 
+                background: {c['accent']} !important; 
+            }}
+            QAbstractScrollArea QScrollBar::add-line:horizontal, QAbstractScrollArea QScrollBar::sub-line:horizontal,
+            QListWidget QScrollBar::add-line:horizontal, QListWidget QScrollBar::sub-line:horizontal,
+            QDialog QScrollBar::add-line:horizontal, QDialog QScrollBar::sub-line:horizontal {{ 
+                height: 0px !important; 
+                background: none !important; 
+            }}
+            QAbstractScrollArea QScrollBar::add-page:horizontal, QAbstractScrollArea QScrollBar::sub-page:horizontal,
+            QListWidget QScrollBar::add-page:horizontal, QListWidget QScrollBar::sub-page:horizontal,
+            QDialog QScrollBar::add-page:horizontal, QDialog QScrollBar::sub-page:horizontal {{ 
+                background: none !important; 
+            }}
+            
+            
 
             QDialog QScrollBar:horizontal {{
                 border: none !important;
@@ -629,11 +658,11 @@ class SkinManager:
         # 🎯 關鍵修正：將傳給 Windows 毛玻璃底板的顏色從亮色 accent 改為暗色 bg_dark_hex
         if hasattr(self.win, 'winId'):
             self.win.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
-            c = getattr(self.win, 'current_theme_config', {})
+            c = self.win.current_theme_config
             bg_hex = c.get('bg_dark_hex', '#0f172a')
             WindowBlurManager.enable_acrylic(int(self.win.winId()), bg_color_hex=bg_hex, alpha=180)
 
-        if hasattr(self.win, '_settings') and isinstance(self.win._settings, dict):
+        if self.win._settings and isinstance(self.win._settings, dict):
             from config import _save_settings
             self.win._settings["theme"] = theme_name
             _save_settings(self.win._settings)
@@ -641,10 +670,10 @@ class SkinManager:
         stylesheet = self.get_skin_stylesheet(theme_name)
         self.win.setStyleSheet(stylesheet)
         accent = self.win.current_theme_accent
-        c = getattr(self.win, 'current_theme_config', {})
+        c = self.win.current_theme_config
         grad = c.get('gradient', (accent, accent, accent))
 
-        if hasattr(self.win, 'sidebar_btns') and self.win.sidebar_btns:
+        if self.win.sidebar_btns:
             active_btn = getattr(self.win, 'current_sidebar_btn', self.win.sidebar_btns[0])
             self.win.update_sidebar_btn_styles(active_btn)
 
