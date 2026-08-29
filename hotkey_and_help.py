@@ -1,22 +1,9 @@
-import json
-import os
-from PyQt6.QtCore import Qt, QObject, pyqtSignal, QEvent
-from PyQt6.QtGui import QKeySequence
-from PyQt6.QtWidgets import (
-    QApplication, QMessageBox, QDialog, QVBoxLayout, QFormLayout, 
-    QKeySequenceEdit, QPushButton, QLabel
-)
-from config import *
-from config import _load_settings, _save_settings
+# hotkey_and_help.py
+from config import *  # 匯入配置
 
-try:
-    from dialogs import SettingsDialog, M3U管理器主視窗, _save_settings
-except ImportError:
-    pass
-
-# 直接明確匯入 M3U管理器 與 SettingsDialog（請根據你實際檔名對照）
-from m3u_manager import M3U管理器主視窗
 from dialogs import SettingsDialog
+from m3u_manager import M3U管理主視窗
+from config import _load_settings, _save_settings
 
 class HotkeyManager(QObject):
     """負責管理、儲存、加載與監聽所有自定義快捷鍵"""
@@ -70,12 +57,16 @@ class HotkeyManager(QObject):
 
         seq_str = QKeySequence(key_int | modifiers).toString()
 
+        # 🎯 快捷鍵：按 I 鍵切換數據面板
+        if seq_str.lower() == "i":
+            self.action_triggered.emit("toggle_stats")
+            return True
+
         for action, target_seq in self.hotkeys.items():
             if seq_str.lower() == target_seq.lower():
                 self.action_triggered.emit(action)
                 return True
         return False
-
 
 class HotkeySettingDialog(QDialog):
     """用戶自定義按鍵設置對話框"""
@@ -92,17 +83,19 @@ class HotkeySettingDialog(QDialog):
             "seek_backward": "快退 5 秒",
             "seek_forward": "快進 5 秒",
             "play_pause": "播放 / 暫停",
-            "toggle_fullscreen": "切換全螢幕",
-            "exit_fullscreen": "退出全螢幕",
+            "toggle_fullscreen": "切換全屏",
+            "exit_fullscreen": "退出全屏",
             "volume_up": "調高音量",
             "volume_down": "調低音量",
-            "snapshot": "畫面截圖",
+            "snapshot": "截圖",
             "toggle_pip": "切換畫中畫 (PiP)",
             "open_file": "開啟本地檔案 (Ctrl+O)"
         }
 
         for action, current_key in self.mgr.hotkeys.items():
             key_edit = QKeySequenceEdit(QKeySequence(current_key))
+            # 📌 綁定即時監聽：限制單一按鍵與排他防重複
+            key_edit.keySequenceChanged.connect(lambda seq, act=action: self._on_key_changed(act, seq))
             form_layout.addRow(action_names.get(action, action), key_edit)
             self.edits[action] = key_edit
 
@@ -112,13 +105,32 @@ class HotkeySettingDialog(QDialog):
         btn_save.clicked.connect(self.save_settings)
         layout.addWidget(btn_save)
 
+    def _on_key_changed(self, changed_action, key_seq):
+        seq_str = key_seq.toString()
+        if not seq_str:
+            return
+
+        # 1. 解決重複 F11, F11 問題：強制只保留最後一次按下的單一按鍵
+        if "," in seq_str:
+            seq_str = seq_str.split(",")[-1].strip()
+            edit = self.edits[changed_action]
+            edit.blockSignals(True)
+            edit.setKeySequence(QKeySequence(seq_str))
+            edit.blockSignals(False)
+
+        # 2. 解決快捷鍵衝突問題：若其他功能已有相同按鍵，自動清空舊功能
+        for action, edit in self.edits.items():
+            if action != changed_action:
+                if edit.keySequence().toString().lower() == seq_str.lower():
+                    edit.blockSignals(True)
+                    edit.clear()  # 自動抹除重複的舊按鍵
+                    edit.blockSignals(False)
+
     def save_settings(self):
         for action, key_edit in self.edits.items():
             new_key = key_edit.keySequence().toString()
-            if new_key:
-                self.mgr.set_hotkey(action, new_key)
+            self.mgr.set_hotkey(action, new_key)  # 保存最新的單一快捷鍵（被清空的寫入空值）
         self.accept()
-
 
 class HotkeyAndHelpManager(QObject):
     """管理 Hotkey 觸發響應與 Dialog 對話框"""
@@ -138,6 +150,10 @@ class HotkeyAndHelpManager(QObject):
     def eventFilter(self, watched, event):
         """攔截鍵盤按下事件並觸發快捷鍵"""
         if event.type() == QEvent.Type.KeyPress:
+            # 📌 第一性原則：若有任何彈窗（如快捷鍵設置對話框）開啟，自動屏蔽主視窗快捷鍵響應
+            if QApplication.activeModalWidget() is not None:
+                return super().eventFilter(watched, event)
+
             if self.hotkey_mgr.handle_key_event(event):
                 return True
         return super().eventFilter(watched, event)
@@ -145,16 +161,16 @@ class HotkeyAndHelpManager(QObject):
     def dispatch_action(self, action):
         """將熱鍵動作分發給主視窗函數"""
         actions_map = {
-            "seek_backward": lambda: self.win.seek_offset(-5) if hasattr(self.win, 'seek_offset') else None,
-            "seek_forward": lambda: self.win.seek_offset(5) if hasattr(self.win, 'seek_offset') else None,
-            "play_pause": lambda: self.win.toggle_play() if hasattr(self.win, 'toggle_play') else None,
-            "toggle_fullscreen": lambda: self.win.toggle_fullscreen() if hasattr(self.win, 'toggle_fullscreen') else None,
-            "exit_fullscreen": lambda: self.win._esc_handler() if hasattr(self.win, '_esc_handler') else None,
-            "volume_up": lambda: self.win._volume_up() if hasattr(self.win, '_volume_up') else None,
-            "volume_down": lambda: self.win._volume_down() if hasattr(self.win, '_volume_down') else None,
-            "snapshot": lambda: self.win.take_snapshot() if hasattr(self.win, 'take_snapshot') else (self.win._take_snapshot() if hasattr(self.win, '_take_snapshot') else None),
-            "toggle_pip": lambda: self.win.pip_mgr.toggle_pip() if hasattr(self.win, 'pip_mgr') and hasattr(self.win.pip_mgr, 'toggle_pip') else (self.win.toggle_pip() if hasattr(self.win, 'toggle_pip') else None),
-            "open_file": lambda: self.win.drop_mgr.open_file_dialog() if hasattr(self.win, 'drop_mgr') else None,
+            "seek_backward": lambda: self.win.seek_offset(-5),
+            "seek_forward": lambda: self.win.seek_offset(5),
+            "play_pause": self.win.toggle_play,
+            "toggle_fullscreen": self.win.toggle_fullscreen,
+            "exit_fullscreen": self.win._esc_handler,
+            "volume_up": self.win._volume_up,
+            "volume_down": self.win._volume_down,
+            "snapshot": self.win.take_snapshot,
+            "toggle_pip": lambda: self.win.pip_mgr.toggle(),
+            "open_file": self.win.drop_mgr.open_file_dialog,
         }
         handler = actions_map.get(action)
         if handler:
@@ -170,11 +186,10 @@ class HotkeyAndHelpManager(QObject):
             f"• <b>{hk.get('play_pause', 'Space')}</b> : 播放 / 暫停 (選中屏)<br>"
             f"• <b>{hk.get('seek_backward', 'Left')} / {hk.get('seek_forward', 'Right')}</b> : 快退 / 快進 5 秒<br>"
             f"• <b>{hk.get('volume_up', 'Up')} / {hk.get('volume_down', 'Down')}</b> : 調高 / 調低音量<br>"
-            f"• <b>{hk.get('toggle_fullscreen', 'F11')}</b> : 切換全螢幕<br>"
-            f"• <b>{hk.get('exit_fullscreen', 'Esc')}</b> : 退出全螢幕<br>"
-            f"• <b>{hk.get('snapshot', 'S')}</b> : 畫面截圖<br>"
-            f"• <b>{hk.get('toggle_pip', 'P')}</b> : 切換畫中畫 (PiP)<br>"
+            f"• <b>{hk.get('toggle_fullscreen', 'F11')}</b> : 切換全屏<br>"
+            f"• <b>{hk.get('exit_fullscreen', 'Esc')}</b> : 退出全屏<br>"
             f"• <b>{hk.get('snapshot', 'S')}</b> : 截屏<br>"
+            f"• <b>{hk.get('toggle_pip', 'P')}</b> : 切換畫中畫 (PiP)<br>"
             "• <b>點擊分屏</b> : 切換控制焦點與音聲<br>"
         )
         msg.exec()
@@ -197,7 +212,7 @@ class HotkeyAndHelpManager(QObject):
                 self.win._update_hw_btn_style()
 
     def open_m3u_manager(self):
-        dlg = M3U管理器主視窗(self.win, sources=self.win.m3u_sources, current_url=self.win.current_m3u_url)
+        dlg = M3U管理主視窗(self.win, sources=self.win.m3u_sources, current_url=self.win.current_m3u_url)
         if dlg.exec() == QDialog.DialogCode.Accepted:
             sources, selected_url = dlg.get_data()
             self.win.m3u_sources = sources
