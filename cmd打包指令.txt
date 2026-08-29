@@ -1,0 +1,2 @@
+在該專案的路徑，右鍵打開cmd(Terminal)複製並粘貼此指令，即可打包.exe：
+pyinstaller K20_IPTV_Player.spec --clean
