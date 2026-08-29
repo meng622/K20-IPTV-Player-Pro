@@ -10,12 +10,13 @@
 
 ### 簡介
 
-**K20 IPTV Player Pro (Editor Version)** 是一款基於 PyQt6 與 libmpv-2.dll 開發的高效能多功能媒體播放器。本專案衍生自原始 **K20 Player**，核心深度魔改與重構的高效能媒體播放器。專為 IPTV/M3U 直播源優化，支援多屏分屏、畫中畫 (PiP) 及極速頻道加載。並在 **Gemini AI** 的協同合作下完成架構重構、效能優化與功能擴充。
+**K20 IPTV Player Pro (Editor Version)** 是一款基於 PyQt6 與 `libmpv-2.dll, ffmpeg.exe, yt-dlp.exe` 開發的高效能多功能媒體播放器。本專案衍生自原始 **K20 Player**，核心深度魔改與重構的高效能媒體播放器。專為 IPTV/M3U 直播源優化，支援多屏分屏、畫中畫 (PiP) 及極速頻道加載。並在 **Gemini AI** 與 **DeepSeek AI** 的協同合作下完成架構重構、效能優化與功能擴充。
 
 ### 核心特色
 
 * 📺 **多屏分屏播放**：支援 1~4 分屏同時播放，獨佔焦點聲音切換與獨立選單。
 * 🖼️ **畫中畫模式 (PiP)**：一鍵切換懸浮小視窗，具備強行搶焦點機制，支援全域快捷鍵。
+* 🖱 **支持拖拽播放**：鼠標拖拽本地文件、右鍵粘貼網址鏈接播放。
 * ⌨️ **全域自訂快捷鍵**：支援全螢幕、快進快退、截圖 (S)、PiP (P) 等靈活自訂按鍵。
 * 📋 **EPG 與 M3U 管理**：整合節目表解析與動態播放清單管理。
 * 🎨 **動態主題 UI**：現代化極簡漸變進度條與主題配色切換。
@@ -41,12 +42,13 @@
 
 ### Overview
 
-**K20 IPTV Player Pro (Editor Version)** is a high-performance, multi-functional media player built with PyQt6 and `libmpv-2.dll`. Derived from the original **K20 Player**, this project features a deeply modded and restructured core specifically optimized for IPTV/M3U live streams—supporting multi-screen split views, Picture-in-Picture (PiP), and ultra-fast channel loading. Architecture refactoring, performance optimizations, and feature enhancements were completed in collaboration with **Gemini AI**.
+**K20 IPTV Player Pro (Editor Version)** is a high-performance, multi-functional media player built with PyQt6 and `libmpv-2.dll, ffmpeg.exe, yt-dlp.exe`. Derived from the original **K20 Player**, this project features a deeply modded and restructured core specifically optimized for IPTV/M3U live streams—supporting multi-screen split views, Picture-in-Picture (PiP), and ultra-fast channel loading. Architecture refactoring, performance optimizations, and feature enhancements were completed in collaboration with **Gemini AI** and **DeepSeek AI** .
 
 ### Key Features
 
 * 📺 **Multi-Screen Playback**: Supports 1 to 4 split-screen views with active audio focus sync and individual screen controls.
 * 🖼️ **Picture-in-Picture (PiP)**: Smooth floating window mode with auto-focus recovery and global hotkey support.
+* 🖱 **Supports drag-and-drop playback:** Drag and drop local files with the mouse, or right-click and paste a URL link to play.
 * ⌨️ **Global Custom Hotkeys**: Fully customizable shortcuts for Play/Pause, Seek, Snapshot (S), PiP (P), and Fullscreen.
 * 📋 **EPG & M3U Management**: Integrated stream playlist parser and program guide viewer.
 * 🎨 **Dynamic UI Themes**: Modern aesthetic featuring flat gradient sliders and customizable skin themes.
