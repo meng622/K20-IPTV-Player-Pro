@@ -1,13 +1,5 @@
-import os
-import re
-import gzip
-import zlib
-import html
-import sqlite3
-import urllib.request
-import xml.etree.ElementTree as ET
-from datetime import datetime
-from PyQt6.QtCore import QThread, pyqtSignal
+# epg_manager.py
+from config import *  # 匯入配置
 
 def clean_channel_name(name):
     """淨化頻道名稱，移除前綴數字、[HD]、m3u4u 特有後綴如 (src05) 等標籤"""
@@ -25,7 +17,8 @@ def clean_channel_name(name):
     name = re.sub(r'(?i)\b(4k|fhd|hd|sd|hevc|uhd)\b', '', name)
     return name.strip()
 
-# ==================== EPG 資料庫管理 ====================
+    
+# ====================== EPG 資料庫管理 =======================
 class EPGDatabase:
     def __init__(self, db_dir="epg_cache", db_name="epg_cache.db"):
         self.db_dir = db_dir
@@ -66,14 +59,16 @@ class EPGDatabase:
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
 
-        # 優先順序：tvg_id -> 原始名稱 -> 淨化後名稱 -> 模糊 LIKE 搜尋
+        # 放寬時間比對條件（僅匹配前 12 位 YYYYMMDDHHMM），防範 +0800 等時區標籤干擾
+        short_now = now_str[:12]
         query = '''
-            SELECT title FROM programmes 
-            WHERE (channel = ? OR channel = ? OR channel = ? OR channel LIKE ?) 
-              AND start <= ? AND stop >= ?
+            SELECT title FROM programmes
+            WHERE (channel = ? OR channel = ? OR channel = ? OR channel LIKE ?)
+              AND substr(start, 1, 12) <= ? AND substr(stop, 1, 12) >= ?
             LIMIT 1
         '''
-        cursor.execute(query, (tvg_id, channel_name, cleaned_name, like_pattern, now_str, now_str))
+
+        cursor.execute(query, (tvg_id, channel_name, cleaned_name, like_pattern, short_now, short_now))
         row = cursor.fetchone()
         conn.close()
         
@@ -180,6 +175,16 @@ class EPGDownloaderWorker(QThread):
         if not self.epg_url:
             self.finished_signal.emit(False, "EPG 網址為空")
             return
+
+        # 🎯 24小時快取 Bypass 檢查：若 DB 存在且未滿 24 小時，直接 Bypass 網絡請求與 GZ 解壓
+        CACHE_EXPIRE_SECONDS = 86400  # 24 小時 (秒)
+        if os.path.exists(self.db_path):
+            db_mtime = os.path.getmtime(self.db_path)
+            import time
+            if (time.time() - db_mtime) < CACHE_EXPIRE_SECONDS:
+                print("⚡ [EPG Cache] 偵測到有效 EPG 本地快取 (未滿24hr)，直接直通 Bypass 解壓！")
+                self.finished_signal.emit(True, "使用 24 小時內本地 EPG 有效快取")
+                return
 
         try:
             if not os.path.exists(self.db_dir):
@@ -299,3 +304,59 @@ class EPGDownloaderWorker(QThread):
 
         except Exception as e:
             self.finished_signal.emit(False, f"EPG 處理失敗: {str(e)}")
+            
+# ==================== 內存版 EPG Worker（純字典模式，快取速度極快） ====================
+class MemoryEPGWorker(QThread):
+    """使用字典模式加載 EPG，並加入完美名稱清洗（修正函數名）"""
+    finished_signal = pyqtSignal(dict)
+
+    def __init__(self, epg_url):
+        super().__init__()
+        self.epg_url = epg_url
+
+    def run(self):
+        epg_data = {}
+        try:
+            import gzip, urllib.request, re
+            req = urllib.request.Request(self.epg_url, headers={'User-Agent': 'Mozilla/5.0'})
+            with urllib.request.urlopen(req, timeout=12) as resp:
+                raw_data = resp.read()
+                if raw_data[:2] == b'\x1f\x8b':
+                    raw_data = gzip.decompress(raw_data)
+
+            import xml.etree.ElementTree as ET
+            root = ET.fromstring(raw_data)
+            channel_map = {}
+            for ch in root.findall('channel'):
+                ch_id = ch.get('id', '')
+                display_name = ch.findtext('display-name', '')
+                if ch_id:
+                    channel_map[ch_id.lower().strip()] = display_name
+
+            for prog in root.findall('programme'):
+                ch_id = prog.get('channel', '').lower().strip()
+                start = prog.get('start', '')
+                stop = prog.get('stop', '')
+                title = prog.findtext('title', '')
+                prog_dict = {'start': start, 'stop': stop, 'title': title}
+
+                # 🎯 核心修正：使用本檔案頂部嘅 clean_channel_name！
+                keys_to_index = set()
+                if ch_id:
+                    keys_to_index.add(ch_id)
+                    keys_to_index.add(clean_channel_name(ch_id))  # 已修正
+                if ch_id in channel_map and channel_map[ch_id]:
+                    disp_name = channel_map[ch_id]
+                    keys_to_index.add(disp_name)
+                    keys_to_index.add(clean_channel_name(disp_name))  # 已修正
+
+                for ch_key in keys_to_index:
+                    if ch_key:
+                        if ch_key not in epg_data:
+                            epg_data[ch_key] = []
+                        epg_data[ch_key].append(prog_dict)
+
+        except Exception as e:
+            print(f"MemoryEPGWorker 解析失敗: {e}")
+
+        self.finished_signal.emit(epg_data)
