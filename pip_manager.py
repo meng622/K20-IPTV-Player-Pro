@@ -1,11 +1,6 @@
-"""
-pip_manager.py - 獨立畫中畫 (PiP) 模式管理器
-"""
-from PyQt6.QtCore import QObject, Qt, QEvent, QTimer
-from PyQt6.QtGui import QGuiApplication
-from PyQt6.QtWidgets import QWidget, QVBoxLayout, QSizeGrip, QPushButton
+# pip_manager.py
 
-
+from config import *  # 匯入配置
 
 class PiPFloatingWindow(QWidget):
     """獨立 PiP 置頂浮窗容器"""
@@ -128,7 +123,7 @@ class PiPManager(QObject):
         if self.is_pip_mode:
             return
 
-        target_widget = getattr(self.win, 'video_container', None) or getattr(self.win, 'video_widget', None)
+        target_widget = self.win.video_container or self.win.video_widget
         if not target_widget:
             return
 
@@ -162,8 +157,7 @@ class PiPManager(QObject):
 
         # 5. 顯示浮窗，主視窗最小化
         self.pip_window.show()
-        if hasattr(self.win, 'hide'):
-                self.win.hide()  # 或 showMinimized()
+        self.win.hide()
 
         # 🎯 用 QTimer 延遲 50ms，避開 Windows 隱藏視窗時的焦點轉移
         QTimer.singleShot(50, self._force_pip_focus)
@@ -196,7 +190,7 @@ class PiPManager(QObject):
 
         self.is_pip_mode = False
 
-        target_widget = getattr(self.win, 'video_container', None) or getattr(self.win, 'video_widget', None)
+        target_widget = self.win.video_container or self.win.video_widget
 
         # 1. 卸載過濾器與隱藏浮窗
         if self.pip_window:
