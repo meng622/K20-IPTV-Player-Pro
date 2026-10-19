@@ -1,6 +1,6 @@
 # K20 IPTV Player Pro
 
-Windows 桌面 IPTV 播放器（PyQt6 + libmpv），目前版本 **v1.2.0**。
+Windows 桌面 IPTV 播放器（PyQt6 + libmpv），目前版本 **v1.2.1**。
 
 ## 功能
 
@@ -8,7 +8,7 @@ Windows 桌面 IPTV 播放器（PyQt6 + libmpv），目前版本 **v1.2.0**。
 - 多源 EPG 合併、繁簡頻道名匹配、節目表與簡介
 - 直播 / 我的收藏 / 最近播放 / 本地媒體四個視圖，共用搜尋
 - 單屏 / 雙屏 / 三屏 / 四屏，PiP 畫中畫
-- 全屏邊緣面板：左緣頻道列表、右緣節目表、上緣標題欄
+- 全屏邊緣面板：左緣頻道列表、右緣標題欄＋節目表
 - 主題切換、截圖、測速、自訂快捷鍵、拖放檔案
 - 播放清單與 EPG 本地快取（可重建）
 
@@ -16,30 +16,48 @@ Windows 桌面 IPTV 播放器（PyQt6 + libmpv），目前版本 **v1.2.0**。
 
 - Windows 10 / 11 x64
 - Python 3.12
-- `libmpv-2.dll`、`ffmpeg.exe`、`yt-dlp.exe`（開發時預設放 `D:\Libs`，可用 `K20_LIBS` 覆寫）
+- `libmpv-2.dll`、`ffmpeg.exe`、`yt-dlp.exe`
 
-## 開發執行
+三大核心放哪裡都可以，程式會自動依序找：
+
+1. 進階：`K20_LIBS` 環境變數指定的目錄（沒設定就跳過）
+2. `K20_Pro\`（和 `main.py` 同目錄）
+3. `K20_Pro\libs\`
+4. `D:\Libs\`
+
+打包後會優先找 `_internal`（`sys._MEIPASS`）裡隨程式附帶的核心。
+
+## 最快執行
 
 ```powershell
-py -3.12 -m venv .venv
-.\.venv\Scripts\python.exe -m pip install -r requirements.txt
-.\.venv\Scripts\python.exe main.py
+python main.py
 ```
 
-若 `D:\Libs` 不存在，先設定：
+如果系統 Python 還缺套件：
 
 ```powershell
-$env:K20_LIBS = "你的\libs\目錄"
+python -m pip install -r requirements.txt
+```
+
+## 可選：建立 venv
+
+想讓這個專案的套件跟其他專案隔離時才需要：
+
+```powershell
+python -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+.\.venv\Scripts\python.exe main.py
 ```
 
 ## 打包
 
 ```powershell
-$env:K20_LIBS = "D:\Libs"
 pyinstaller K20_IPTV_Player-internal.spec
 ```
 
-PyInstaller 6 會把 DLL 放進 `_internal`，程式已用 `sys._MEIPASS` 查找。
+spec 會用同樣的順序找核心；找不到會直接列出缺少的檔名和搜尋過的路徑。PyInstaller 6 會把 DLL 放進 `_internal`，程式用 `sys._MEIPASS` 查找。
+
+> `K20_LIBS` 只是給「核心放在其他磁碟/目錄」的人用的可選開關，一般情況不用設定。
 
 ## 設定與資料
 

@@ -4,19 +4,58 @@ from PyQt6 import sip  # sip 套件
 from config import _script_dir  # 腳本目錄
 from ctypes import wintypes  # 視窗類型
 
-# ========== 路徑設定（區分開發 / 打包） ==========
-if getattr(sys, 'frozen', False):
-    # 打包狀態：PyInstaller 6 的 DLL 在 _internal（sys._MEIPASS），不是 exe 根目錄
-    _base_path = getattr(sys, "_MEIPASS", os.path.dirname(sys.executable))
-else:
-    # 開發狀態：從固定共享目錄載入（請修改為你存放 DLL 的路徑）
-    SHARED_LIBS = r"D:\Libs"   # ← 改為你的實際路徑
-    _base_path = SHARED_LIBS   # 開發時直接使用共享目錄
+# ========== 核心檔案搜尋（本地 / libs / D:\Libs 都支援） ==========
+CORE_FILES = ("libmpv-2.dll", "ffmpeg.exe", "yt-dlp.exe")  # 三大核心
 
-# 定義各依賴檔案的完整路徑（均基於 _base_path）
-_libmpv_path = os.path.join(_base_path, "libmpv-2.dll")
-_ytdl_path = os.path.join(_base_path, "yt-dlp.exe")
-_ffmpeg_dir = _base_path   # 環境變數 PATH 加入此目錄
+
+def _build_core_dirs():  # 建立搜尋順序
+    dirs = []  # 候選目錄
+    if getattr(sys, "frozen", False):  # 打包後優先找 _MEIPASS
+        meipass = getattr(sys, "_MEIPASS", "")
+        if meipass:
+            dirs.append(meipass)
+    env_dir = os.environ.get("K20_LIBS", "").strip()  # 可選的環境變數
+    if env_dir:
+        dirs.append(env_dir)
+    dirs.append(_script_dir)  # main.py / exe 同目錄
+    dirs.append(os.path.join(_script_dir, "libs"))  # 專案 libs 子目錄
+    dirs.append(r"D:\Libs")  # 舊習慣
+    result, seen = [], set()  # 去重
+    for d in dirs:
+        d = os.path.abspath(os.path.expanduser(d))  # 絕對路徑
+        key = os.path.normcase(d)  # Windows 不分大小寫
+        if key not in seen:
+            seen.add(key)
+            result.append(d)
+    return result
+
+
+def _find_core(name):  # 找單一核心檔案
+    for d in _core_dirs:
+        path = os.path.join(d, name)
+        if os.path.isfile(path):
+            return path
+    return ""  # 找不到
+
+
+_core_dirs = _build_core_dirs()  # 搜尋順序
+_libmpv_path = _find_core("libmpv-2.dll")  # libmpv
+_ffmpeg_path = _find_core("ffmpeg.exe")  # ffmpeg
+_ytdl_path = _find_core("yt-dlp.exe")  # yt-dlp
+_libmpv_dir = os.path.dirname(_libmpv_path) if _libmpv_path else ""  # libmpv 目錄
+_ffmpeg_dir = os.path.dirname(_ffmpeg_path) if _ffmpeg_path else _core_dirs[0]  # ffmpeg 目錄
+if not _ytdl_path:  # 找不到時仍給一個候選路徑
+    _ytdl_path = os.path.join(_core_dirs[0], "yt-dlp.exe")
+
+for _d in {_libmpv_dir, _ffmpeg_dir, os.path.dirname(_ytdl_path)}:  # 加入 DLL/PATH
+    if not _d:
+        continue
+    if _d not in os.environ.get("PATH", ""):
+        os.environ["PATH"] = _d + os.pathsep + os.environ.get("PATH", "")
+    try:
+        os.add_dll_directory(_d)  # 讓 libmpv 找到同目錄依賴
+    except (OSError, AttributeError):
+        pass
 # ============================================
 
 WM_LBUTTONDBLCLK = 0x0203  # 雙擊代碼
@@ -41,10 +80,15 @@ class MpvEmbedWidget(QWidget):  # 播放核心
         self.setMouseTracking(True)  # 滑鼠追蹤
         self.mpv = self  # 指向自己
         
+        if not _libmpv_path:  # 找不到核心
+            raise RuntimeError(
+                "找不到 libmpv-2.dll，已搜尋：\n" + "\n".join(_core_dirs)
+                + "\n請把 libmpv-2.dll 放到 K20_Pro、K20_Pro\\libs 或 D:\\Libs。"
+            )  # 明確提示
         try:  # 嘗試載入
             self._lib = ctypes.CDLL(_libmpv_path)  # 載入 DLL
         except OSError as e:  # 載入失敗
-            raise RuntimeError(f"無法載入 libmpv-2.dll: {e}\n請確保 libmpv-2.dll 位於 {_base_path}。")  # 拋出異常
+            raise RuntimeError(f"無法載入 {_libmpv_path}: {e}")  # 拋出異常
 
         self._ctx = None  # 核心指標
         self._paused = False  # 暫停標記

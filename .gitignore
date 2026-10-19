@@ -15,6 +15,12 @@ __pycache__/
 build/
 dist/
 
+# ---- 播放器核心（體積大、不可入庫；放專案根目錄或 libs/ 都行）----
+libmpv-2.dll
+ffmpeg.exe
+yt-dlp.exe
+libs/
+
 # ---- 程式自動產生的快取資料（可重建）----
 epg_cache/
 logo_cache/

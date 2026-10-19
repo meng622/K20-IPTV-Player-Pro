@@ -112,7 +112,7 @@ else:  # 源碼執行
 
 # 應用程式版本（語意化版本：major.minor.patch）
 APP_NAME = "K20 IPTV Player Pro"  # 程式名稱
-APP_VERSION = "1.2.0"  # 目前版本
+APP_VERSION = "1.2.1"  # 目前版本
 
 # 設定檔路徑
 _SETTINGS_FILE = os.path.join(_script_dir, "k20_settings.json")  # 設定檔路徑
