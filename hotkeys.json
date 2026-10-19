@@ -1,0 +1,12 @@
+{
+    "seek_backward": "Left",
+    "seek_forward": "Right",
+    "play_pause": "Space",
+    "toggle_fullscreen": "F11",
+    "exit_fullscreen": "Esc",
+    "volume_up": "Up",
+    "volume_down": "Down",
+    "snapshot": "S",
+    "toggle_pip": "P",
+    "open_file": "Ctrl+O"
+}

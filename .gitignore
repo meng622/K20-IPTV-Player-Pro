@@ -1,0 +1,38 @@
+# ================= K20 Pro 版本管理忽略清單 =================
+# 只排除「可重建/可再下載」的東西；程式碼、設定、資源全部入庫。
+
+# ---- 虛擬環境（幾千個檔案，重建即可；改名/搬運後也不用留） ----
+.venv/
+venv/
+env/
+
+# ---- Python 編譯快取 ----
+__pycache__/
+*.py[cod]
+*.pyo
+
+# ---- PyInstaller 打包輸出 ----
+build/
+dist/
+
+# ---- 程式自動產生的快取資料（可重建）----
+epg_cache/
+logo_cache/
+snapshots/
+
+# ---- 其他暫存/備份 ----
+*.log
+*.bak
+*.tmp
+*.corrupt-*
+*.zip
+_備份_*/
+_backup_*/
+
+# ---- 本機設定（含明文 Xtream 帳密，絕不入庫）----
+k20_settings.json
+
+# 注意：
+#   k20_settings.json 內有訂閱帳密，已排除；新環境請複製
+#   k20_settings.example.json 為 k20_settings.json 再填入自己的源。
+#   hotkeys.json 不含機密，仍保留入庫。

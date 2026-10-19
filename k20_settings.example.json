@@ -1,0 +1,19 @@
+{
+  "theme": "cyan",
+  "volume": 100,
+  "last_channel": "",
+  "current_m3u_url": "",
+  "m3u_sources": [
+    {
+      "name": "範例訂閱",
+      "url": "https://example.com/live.m3u",
+      "epg": "",
+      "logo": ""
+    }
+  ],
+  "favorites_list": [],
+  "history_list": [],
+  "auto_play_last": false,
+  "hwdec": true,
+  "cache_mb": 100
+}

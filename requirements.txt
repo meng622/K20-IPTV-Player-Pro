@@ -1,0 +1,3 @@
+PyQt6>=6.6
+requests>=2.31
+watchdog>=4.0

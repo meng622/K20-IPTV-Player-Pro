@@ -1,0 +1,1 @@
+pyinstaller K20_IPTV_Player-internal.spec
