@@ -1,3 +1,5 @@
+<img width="256" height="256" alt="httpsicon-icons comicon-play-video297750-256px" src="https://github.com/user-attachments/assets/ff292756-db74-4cec-a2be-209697a29f00" />
+
 # K20 IPTV Player Pro
 
 Windows 桌面 IPTV 播放器（PyQt6 + libmpv），目前版本 **v1.2.1**。
